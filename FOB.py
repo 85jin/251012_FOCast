@@ -2,6 +2,7 @@
 # V5 schema + rate-based alerts + dependent filters + chart axis toggle + XLSX engine fallback
 
 import io
+import re
 from datetime import datetime, timedelta, date
 
 import numpy as np
@@ -17,7 +18,6 @@ import altair as alt
 # -----------------------------
 st.set_page_config(page_title="FOCast - 이물 분석·알림", layout="wide", initial_sidebar_state="expanded")
 APP_TITLE = "FOCast – 이물 분석·알림 웹앱"
-SECRET_CODE = "cj123456"  # 주기적 변경 예정
 
 # V5 스키마 (stage 제거, material_type 추가)
 REQUIRED_COLUMNS = [
@@ -37,30 +37,7 @@ DEFAULT_RECENT_DAYS = 7
 DEFAULT_BASELINE_DAYS = 180
 SURGE_Z_THRESHOLD = 3.0  # z >= 3 상승, z <= -3 하락
 
-# -----------------------------
-# 인증
-# -----------------------------
-def auth_gate():
-    st.markdown("### 🔐 보안코드 입력")
-    with st.form("auth_form", clear_on_submit=False):
-        code = st.text_input("보안코드", type="password", help="접속 보안코드가 필요합니다.")
-        ok = st.form_submit_button("접속")
-        if ok:
-            if code == SECRET_CODE:
-                st.session_state["_authed"] = True
-                st.success("접속 허용되었습니다.")
-            else:
-                st.session_state["_authed"] = False
-                st.error("보안코드가 올바르지 않습니다.")
-
-if "_authed" not in st.session_state:
-    st.session_state["_authed"] = False
-
 st.title(APP_TITLE)
-
-if not st.session_state["_authed"]:
-    auth_gate()
-    st.stop()
 
 # -----------------------------
 # 유틸 & 전처리
@@ -96,8 +73,52 @@ def load_file(uploaded_file, sheet_name: str | None = None) -> pd.DataFrame:
 
     raise ValueError("지원하지 않는 파일 형식입니다. CSV 또는 Excel(.xlsx/.xls)만 업로드하세요.")
 
+
+CONTAM_WIDE_PATTERN = re.compile(r"^contam_type_(중대|일반)_(.+)_count$")
+
+
+def reshape_wide_contam(df: pd.DataFrame) -> tuple[pd.DataFrame, bool]:
+    """신규 wide schema(contam_type_*_count) → long 변환."""
+    contam_cols = [c for c in df.columns if isinstance(c, str) and CONTAM_WIDE_PATTERN.match(c)]
+    if not contam_cols:
+        return df, False
+
+    base_cols = [c for c in df.columns if c not in contam_cols]
+    work = df.reset_index(drop=True).copy()
+    work["_base_id"] = work.index
+
+    melted = work.melt(
+        id_vars=base_cols + ["_base_id"],
+        value_vars=contam_cols,
+        var_name="_contam_key",
+        value_name="count",
+    )
+
+    extracted = melted["_contam_key"].str.extract(CONTAM_WIDE_PATTERN)
+    melted["severity"] = extracted[0].fillna("")
+    melted["contam_type"] = extracted[1].fillna("")
+    melted.drop(columns=["_contam_key"], inplace=True)
+
+    melted["count"] = pd.to_numeric(melted["count"], errors="coerce").fillna(0).astype(int)
+    if "selection_amount_kg" in melted.columns:
+        melted["selection_amount_kg"] = pd.to_numeric(
+            melted["selection_amount_kg"], errors="coerce"
+        ).fillna(0.0)
+    else:
+        melted["selection_amount_kg"] = 0.0
+
+    melted["selection_amount_kg_unique"] = 0.0
+    if "selection_amount_kg" in melted.columns:
+        first_idx = melted.groupby("_base_id").head(1).index
+        melted.loc[first_idx, "selection_amount_kg_unique"] = melted.loc[first_idx, "selection_amount_kg"]
+
+    return melted, True
+
+
 def ensure_columns(df: pd.DataFrame) -> pd.DataFrame:
     """필수 컬럼/타입 보정 (V5)"""
+    df, _ = reshape_wide_contam(df)
+
     for col in REQUIRED_COLUMNS:
         if col not in df.columns:
             df[col] = np.nan
@@ -109,12 +130,24 @@ def ensure_columns(df: pd.DataFrame) -> pd.DataFrame:
         df["dt"] = pd.to_datetime(df["dt"], errors="coerce").dt.date
 
     # 숫자형
-    for c in ["count", "selection_amount_kg", "이물수준", "중대이물 수준", "일반이물 수준"]:
+    numeric_targets = ["count", "selection_amount_kg", "이물수준", "중대이물 수준", "일반이물 수준"]
+    for c in numeric_targets:
         df[c] = pd.to_numeric(df[c], errors="coerce")
     df["count"] = df["count"].fillna(0).astype(int)
-    df["selection_amount_kg"] = df["selection_amount_kg"].fillna(0).astype(int)
+    df["selection_amount_kg"] = df["selection_amount_kg"].fillna(0.0).astype(float)
     for c in ["이물수준","중대이물 수준","일반이물 수준"]:
         df[c] = df[c].fillna(0.0).astype(float)
+
+    if "selection_amount_kg_unique" not in df.columns:
+        df["selection_amount_kg_unique"] = df["selection_amount_kg"]
+    else:
+        df["selection_amount_kg_unique"] = pd.to_numeric(
+            df["selection_amount_kg_unique"], errors="coerce"
+        ).fillna(0.0)
+    df["selection_amount_kg_unique"] = df["selection_amount_kg_unique"].astype(float)
+
+    if "_base_id" not in df.columns:
+        df["_base_id"] = np.arange(len(df))
 
     # 문자열형
     str_cols = [
@@ -421,7 +454,8 @@ with tab1:
     st.session_state["filtered_df"] = f
 
     st.write(f"필터 결과: **{len(f):,}건**")
-    st.dataframe(f.head(200), use_container_width=True)
+    hide_cols = [c for c in f.columns if str(c).startswith("_")]
+    st.dataframe(f.head(200).drop(columns=hide_cols, errors="ignore"), use_container_width=True)
 
     # ---- 피벗 ----
     st.markdown("#### 피벗 테이블")
@@ -449,7 +483,14 @@ with tab1:
     def pivot_rates(frame, rows, cols, which="all"):
         """which: 'all'|'sev'|'norm' -> (sum count)/sum selection_amount_kg"""
         grp = rows + (cols if cols else [])
-        denom = frame.groupby(grp)["selection_amount_kg"].sum()
+        grp = list(dict.fromkeys(grp))
+
+        if "_base_id" in frame.columns:
+            dedup_cols = grp + ["_base_id", "selection_amount_kg"]
+            dedup = frame[dedup_cols].drop_duplicates(subset=grp + ["_base_id"])
+            denom = dedup.groupby(grp)["selection_amount_kg"].sum()
+        else:
+            denom = frame.groupby(grp)["selection_amount_kg"].sum()
         if which == "all":
             num = frame.groupby(grp)["count"].sum()
         elif which == "sev":
@@ -557,6 +598,10 @@ with tab2:
             df["dt"] = pd.to_datetime(df["dt"]).dt.date
         df["count"] = pd.to_numeric(df.get("count", 0), errors="coerce").fillna(0)
         df["selection_amount_kg"] = pd.to_numeric(df.get("selection_amount_kg", 0), errors="coerce").fillna(0)
+        if "selection_amount_kg_unique" in df.columns:
+            df["selection_amount_kg_unique"] = pd.to_numeric(
+                df.get("selection_amount_kg_unique", 0), errors="coerce"
+            ).fillna(0)
         # 키 누락 방지용 빈 컬럼
         for k in ["plant","line","material_type","material_code","supplier_code","contam_type"]:
             if k not in df.columns:
@@ -661,388 +706,387 @@ with tab2:
         else:
             st.info("급증/하락 분석 대상 데이터가 없습니다.")
 
-# ----- 여기부터 교체: 선택 항목 그래프 (최근 180일 '이물수준' 시계열 + SPC) -----
-st.markdown("##### 선택 항목 그래프 (최근 180일 일일 이물수준 + b/expected/x rate 선)")
+    def render_alert_details():
+        # ----- 여기부터 교체: 선택 항목 그래프 (최근 180일 '이물수준' 시계열 + SPC) -----
+        st.markdown("##### 선택 항목 그래프 (최근 180일 일일 이물수준 + b/expected/x rate 선)")
 
-if surge_df is None or surge_df.empty:
-    st.info("표시할 조합이 없습니다.")
-    st.stop()
+        def as_str(v):
+            return "" if pd.isna(v) else str(v)
 
-# 선택 라벨 구성 (plant | line | material_type | supplier | material | contam)
-def as_str(v): return "" if pd.isna(v) else str(v)
-view_df = surge_df.head(1000).copy()
-view_df["key"] = (
-    view_df["plant"].map(as_str) + " | " +
-    view_df["line"].map(as_str) + " | " +
-    view_df["material_type"].map(as_str) + " | " +
-    view_df["supplier_code"].map(as_str) + " | " +
-    view_df["material_code"].map(as_str) + " | " +
-    view_df["contam_type"].map(as_str)
-)
-
-sel = st.selectbox("항목 선택 (plant | line | material_type | supplier | material | contam)",
-                   options=view_df["key"].tolist())
-srow = view_df[view_df["key"] == sel].iloc[0]
-
-# 일자 범위
-base_start = TODAY - timedelta(days=BASE_DAYS - 1)
-
-# 동일 7키 + 날짜 범위 마스크
-mask = (
-    (fdf["dt"] >= base_start) & (fdf["dt"] <= TODAY) &
-    (fdf["plant"]         == srow["plant"]) &
-    (fdf["line"]          == srow["line"]) &
-    (fdf["material_type"] == srow["material_type"]) &
-    (fdf["material_code"] == srow["material_code"]) &
-    (fdf["supplier_code"] == srow["supplier_code"]) &
-    (fdf["contam_type"]   == srow["contam_type"])
-)
-ts = fdf.loc[mask, ["dt","count","selection_amount_kg"]].copy()
-
-# 캘린더(빠진 날짜 0 채움)
-calendar = pd.DataFrame({"dt": [base_start + timedelta(days=i) for i in range(BASE_DAYS)]})
-daily = (
-    ts.groupby("dt", as_index=False)[["count","selection_amount_kg"]].sum()
-      .merge(calendar, on="dt", how="right")
-      .fillna({"count":0, "selection_amount_kg":0})
-      .sort_values("dt")
-)
-daily["has_selection"] = daily["selection_amount_kg"] > 0  # (1) 선별 有/無 플래그
-daily["daily_rate"] = np.where(daily["selection_amount_kg"]>0,
-                               daily["count"]/daily["selection_amount_kg"], 0.0)
-
-# 수평선들 (기간 전체 고정값: b/expected/x)
-b_rate   = float(srow.get("b_rate", 0.0)) if "b_rate" in srow else 0.0
-exp_rate = float(srow.get("expected_recent_rate", b_rate)) if "expected_recent_rate" in srow else b_rate
-x_rate   = float(srow.get("x_rate", 0.0)) if "x_rate" in srow else 0.0
-
-lines_df = pd.DataFrame({
-    "dt":   list(daily["dt"]) * 3,
-    "value": [b_rate] * len(daily) + [exp_rate] * len(daily) + [x_rate] * len(daily),
-    "type":  (["기준선 b_rate"] * len(daily)) + (["최근 기대 expected_rate"] * len(daily)) + (["최근 실측 x_rate"] * len(daily)),
-})
-
-# (1) 시각화: 선별 有/無를 색/모양으로 구분
-recent_start = TODAY - timedelta(days=RECENT_DAYS-1)
-band = alt.Chart(pd.DataFrame({"start":[recent_start], "end":[TODAY]})).mark_rect(
-    opacity=0.08, color="#E53935"
-).encode(x="start:T", x2="end:T")
-
-points_sel = alt.Chart(daily[daily["has_selection"]]).mark_circle(size=55, opacity=0.75).encode(
-    x=alt.X("dt:T", title="일자"),
-    y=alt.Y("daily_rate:Q", title="일일 이물수준 (count/kg)", axis=alt.Axis(format=".4f")),
-    color=alt.value("#1E88E5"),
-    shape=alt.value("circle"),
-    tooltip=["dt:T","count:Q","selection_amount_kg:Q","daily_rate:Q"]
-)
-
-points_nosel = alt.Chart(daily[~daily["has_selection"]]).mark_square(size=45, opacity=0.45).encode(
-    x=alt.X("dt:T"),
-    y=alt.Y("daily_rate:Q"),
-    color=alt.value("#9E9E9E"),
-    shape=alt.value("square"),
-    tooltip=["dt:T", alt.Tooltip("selection_amount_kg:Q", title="selection_kg")]
-)
-
-lines = alt.Chart(lines_df).mark_line(size=2).encode(
-    x="dt:T",
-    y=alt.Y("value:Q", title="일일 이물수준 (count/kg)", axis=alt.Axis(format=".4f")),
-    color=alt.Color("type:N", title=None)
-)
-
-st.altair_chart((band + points_nosel + points_sel + lines).properties(height=360), use_container_width=True)
-st.caption("• 원형=선별 有, 회색 사각형=선별 無  • 선: b_rate / expected_recent_rate / x_rate (기간 전체 동일 값)")
-
-# -----------------------------
-# (2) 원료업체 SPC 관리도(u-chart) + (3) 통계 평가/개선 제안
-# -----------------------------
-st.markdown("###### ▷ 업체 SPC 관리도(u-chart) (선별일수 ≥ 20일일 때 표시)")
-
-# ✅ 변경된 집계 기준:
-#   선택된 supplier_code + material_code + contam_type 기준으로
-#   현재 화면 필터 내에서 일별 총 count / 총 kg 집계
-sup_mask = (
-    (fdf["dt"] >= base_start) & (fdf["dt"] <= TODAY) &
-    (fdf["supplier_code"] == srow["supplier_code"]) &
-    (fdf["material_code"] == srow["material_code"]) &
-    (fdf["contam_type"]   == srow["contam_type"])
-)
-sup_ts = fdf.loc[sup_mask, ["dt","count","selection_amount_kg"]].copy()
-
-# 일별 합계 (모수 0일 제외)
-sup_daily = (sup_ts.groupby("dt", as_index=False)
-                .agg(count=("count","sum"), kg=("selection_amount_kg","sum"))
-                .sort_values("dt"))
-sup_daily = sup_daily[sup_daily["kg"] > 0]
-
-if len(sup_daily) < 20:
-    st.info(
-        f"SPC 표시 보류: 선택 조합 "
-        f"(supplier={srow['supplier_code']}, material={srow['material_code']}, contam={srow['contam_type']}) "
-        f"선별일 수가 {len(sup_daily)}일입니다. (≥ 20일 필요)"
-    )
-else:
-    # u-chart 계산
-    ubar = sup_daily["count"].sum() / sup_daily["kg"].sum()
-    sup_daily["u"] = sup_daily["count"] / sup_daily["kg"]
-    sup_daily["ucl"] = ubar + 3.0 * np.sqrt(np.maximum(ubar, 0) / sup_daily["kg"])
-    sup_daily["lcl"] = np.maximum(0.0, ubar - 3.0 * np.sqrt(np.maximum(ubar, 0) / sup_daily["kg"]))
-    sup_daily["z"] = np.where(ubar > 0, (sup_daily["u"] - ubar) / np.sqrt(ubar / sup_daily["kg"]), 0.0)
-
-    # SPC 차트
-    u_line = alt.Chart(sup_daily).mark_line(color="#3949AB").encode(
-        x="dt:T", y=alt.Y("u:Q", title="결점률 u (count/kg)", axis=alt.Axis(format=".4f"))
-    )
-    cl_rule = alt.Chart(sup_daily).mark_rule(color="#00897B", strokeDash=[6,4]).encode(
-        x="dt:T", y="mean(u):Q"  # 중앙선(≈ ubar)
-    )
-    ucl_line = alt.Chart(sup_daily).mark_line(color="#E53935", strokeDash=[4,3]).encode(
-        x="dt:T", y="ucl:Q"
-    )
-    lcl_line = alt.Chart(sup_daily).mark_line(color="#E53935", strokeDash=[4,3]).encode(
-        x="dt:T", y="lcl:Q"
-    )
-    pts_spc = alt.Chart(sup_daily).mark_circle(size=50).encode(
-        x="dt:T", y="u:Q",
-        color=alt.condition("datum.u > datum.ucl || datum.u < datum.lcl",
-                            alt.value("#E53935"), alt.value("#43A047")),
-        tooltip=["dt:T","count:Q","kg:Q","u:Q","ucl:Q","lcl:Q","z:Q"]
-    )
-
-    st.altair_chart((ucl_line + lcl_line + cl_rule + u_line + pts_spc).properties(height=300),
-                    use_container_width=True)
-
-    # (3) 통계적/과학적 평가 & 개선 제안 (기존 로직 유지)
-    n = len(sup_daily)
-    out_hi = int((sup_daily["u"] > sup_daily["ucl"]).sum())
-    out_lo = int((sup_daily["u"] < sup_daily["lcl"]).sum())
-    out_rate = (out_hi + out_lo) / n
-    z_abs_max = float(np.abs(sup_daily["z"]).max())
-
-    # 과산포 간단 체크
-    var_obs = float(np.var(sup_daily["count"] - sup_daily["kg"] * ubar, ddof=1))
-    var_exp = float(np.mean(sup_daily["kg"] * ubar))
-    overdisp = var_obs > 1.5 * var_exp
-
-    verdict = []
-    if out_rate >= 0.05 or z_abs_max >= 3.5:
-        verdict.append("**관리불량(경보 수준)**: 관리한계 위반율이 높거나 극단치가 큼.")
-    elif out_rate >= 0.02 or z_abs_max >= 3.0:
-        verdict.append("**주의 필요**: 변동성이 커지고 있음.")
-    else:
-        verdict.append("**관리양호**: 통계적으로 안정적인 수준.")
-    if overdisp:
-        verdict.append("**과산포 의심**: 단순 포아송 가정보다 산포가 큽니다.")
-
-    actions = [
-        "- **자석·체·금속검출기** 점검 주기 단축 및 감도 재검증",
-        "- **LOT별 이물 이력** 사전심사(입고검사 강화), 고위험 LOT 선별 우선",
-        "- **설비 청결/세척 SOP** 강화, 교대/작업자 편차 모니터링",
-        "- **선별량/속도 최적화**로 과부하 구간 제거",
-    ]
-    st.markdown("**통계 평가:** " + " ".join(verdict))
-    st.markdown("**개선 제안:**")
-    st.markdown("\n".join([f"  {a}" for a in actions]))
-
-# ----- 여기까지 교체 -----
-
-# =============================
-# 3) 최근 2일 치명적 이물 추적 & 교차공장 사용 이력 (보완판)
-# =============================
-st.markdown("#### 🔎 최근 2일 치명적 이물 원료 추적 & 교차공장 사용 이력")
-
-def _crit_key(x):
-    """금속/유리 계열을 한/영/표기변형 포함해 공통 키로 정규화."""
-    s = str(x).strip().lower()
-    if any(k in s for k in ["금속", "metal"]):
-        return "metal"
-    if any(k in s for k in ["유리", "glass"]):
-        return "glass"
-    return None
-
-# (A) 최근 2일 (TODAY 포함)
-last2_start = TODAY - timedelta(days=1)
-mask_last2_crit = (
-    (fdf["dt"] >= last2_start) & (fdf["dt"] <= TODAY) &
-    (fdf["count"] > 0) &
-    fdf["contam_type"].apply(lambda v: _crit_key(v) is not None)
-)
-
-cols_needed = [
-    "dt","plant","line","lot_no","contam_type","count","selection_amount_kg",
-    "material_code","material_name","supplier_code","supplier_name","material_type"
-]
-for c in cols_needed:
-    if c not in fdf.columns:
-        fdf[c] = "" if c not in ["count","selection_amount_kg"] else 0
-
-crit_last2_raw = fdf.loc[mask_last2_crit, cols_needed].copy()
-crit_last2_raw["crit_key"] = crit_last2_raw["contam_type"].map(_crit_key)
-
-if crit_last2_raw.empty:
-    st.info("최근 2일 내 치명적 이물(금속/유리) 발생 데이터가 없습니다.")
-else:
-    # ① 최근 2일 치명적 이물 발생 목록 (요구 컬럼으로 표시, lot_no 그대로)
-    grp_cols = ["plant","line","dt","lot_no","contam_type","material_code","supplier_code"]
-    crit_last2 = (
-        crit_last2_raw
-        .groupby(grp_cols, as_index=False)
-        .agg(
-            발생건수=("count","sum"),
-            selection_amount_kg=("selection_amount_kg","sum"),
-            material_name=("material_name","first"),
-            supplier_name=("supplier_name","first"),
-            material_type=("material_type","first"),
-            crit_key=("crit_key","first")
-        )
-        .sort_values(["dt","plant","line"], ascending=[False,True,True])
-    )
-
-    st.markdown("##### ① 최근 2일 치명적 이물 발생 목록")
-    st.dataframe(
-        crit_last2[[
-            "plant","line","dt","lot_no","contam_type","발생건수","selection_amount_kg",
-            "material_code","supplier_code","material_name","supplier_name","material_type"
-        ]],
-        use_container_width=True
-    )
-
-    # 선택(① → ②)
-    def _lab(r):
-        return f"{r['dt']} | {r['plant']} | {r['line']} | lot_no={r['lot_no']} | {r['contam_type']} | {r['material_code']} | {r['supplier_code']}"
-    crit_last2["label"] = crit_last2.apply(_lab, axis=1)
-
-    sel_label = st.selectbox("원료 선택 (→ 동일 원료의 타 공장 사용 이력 조회)",
-                             options=crit_last2["label"].tolist())
-    sel = crit_last2[crit_last2["label"]==sel_label].iloc[0]
-
-    sel_mat = sel["material_code"]
-    sel_sup = sel["supplier_code"]
-    sel_lot = str(sel["lot_no"]) if pd.notna(sel["lot_no"]) else ""
-    sel_plant = sel["plant"]
-    sel_line  = sel["line"]
-    sel_dt    = sel["dt"]
-    sel_contam= sel["contam_type"]
-    sel_crit  = sel["crit_key"]  # "metal" 또는 "glass"
-    sel_cnt   = int(sel["발생건수"])
-    sel_kg    = float(sel["selection_amount_kg"])
-    sel_mname = sel["material_name"]
-    sel_sname = sel["supplier_name"]
-
-    # (B) 동일 원료(코드+업체)로 최근 180일 '다른 plant' 사용 이력 (+ 동일 이물만의 발생건수)
-    search_start = baseline_start
-    base180 = fdf[
-        (fdf["dt"] >= search_start) & (fdf["dt"] <= TODAY) &
-        (fdf["material_code"] == sel_mat) &
-        (fdf["supplier_code"] == sel_sup) &
-        (fdf["plant"] != sel_plant)
-    ].copy()
-    base180["crit_key"] = base180["contam_type"].map(_crit_key)
-
-    if base180.empty:
-        st.info("최근 180일 동안 동일 원료(코드+업체)의 타 공장 사용 실적이 없습니다.")
-        usage = pd.DataFrame()
-    else:
-        # 동일 LOT 여부
-        base180["same_lot"] = False
-        if sel_lot.strip():
-            base180["same_lot"] = base180["lot_no"].astype(str).eq(sel_lot)
-
-        # 사용량 집계
-        usage_base = (
-            base180.groupby(["plant","line","dt","lot_no"], as_index=False)
-                   .agg(usage_kg=("selection_amount_kg","sum"))
+        view_df = surge_df.head(1000).copy()
+        view_df["key"] = (
+            view_df["plant"].map(as_str) + " | " +
+            view_df["line"].map(as_str) + " | " +
+            view_df["material_type"].map(as_str) + " | " +
+            view_df["supplier_code"].map(as_str) + " | " +
+            view_df["material_code"].map(as_str) + " | " +
+            view_df["contam_type"].map(as_str)
         )
 
-        # 동일 이물만의 발생건수 집계 (①에서의 이물 계열(sel_crit)과 일치하는 건만 합산)
-        samecrit = base180[base180["crit_key"] == sel_crit]
-        samecrit_cnt = (
-            samecrit.groupby(["plant","line","dt","lot_no"], as_index=False)
-                    .agg(same_critical_count=("count","sum"))
+        sel = st.selectbox(
+            "항목 선택 (plant | line | material_type | supplier | material | contam)",
+            options=view_df["key"].tolist(),
+        )
+        srow = view_df[view_df["key"] == sel].iloc[0]
+
+        base_start = TODAY - timedelta(days=BASE_DAYS - 1)
+
+        mask = (
+            (fdf["dt"] >= base_start) & (fdf["dt"] <= TODAY) &
+            (fdf["plant"] == srow["plant"]) &
+            (fdf["line"] == srow["line"]) &
+            (fdf["material_type"] == srow["material_type"]) &
+            (fdf["material_code"] == srow["material_code"]) &
+            (fdf["supplier_code"] == srow["supplier_code"]) &
+            (fdf["contam_type"] == srow["contam_type"])
+        )
+        ts = fdf.loc[mask, ["dt", "count", "selection_amount_kg"]].copy()
+
+        calendar = pd.DataFrame({"dt": [base_start + timedelta(days=i) for i in range(BASE_DAYS)]})
+        daily = (
+            ts.groupby("dt", as_index=False)[["count", "selection_amount_kg"]].sum()
+              .merge(calendar, on="dt", how="right")
+              .fillna({"count": 0, "selection_amount_kg": 0})
+              .sort_values("dt")
+        )
+        daily["has_selection"] = daily["selection_amount_kg"] > 0
+        daily["daily_rate"] = np.where(
+            daily["selection_amount_kg"] > 0,
+            daily["count"] / daily["selection_amount_kg"],
+            0.0,
         )
 
-        # 동일 LOT 사용 강조 플래그 (날짜 단위로 OR)
-        same_lot_flag = (
-            base180.groupby(["plant","line","dt","lot_no"], as_index=False)
-                   .agg(same_lot=("same_lot","max"))
+        b_rate = float(srow.get("b_rate", 0.0)) if "b_rate" in srow else 0.0
+        exp_rate = float(srow.get("expected_recent_rate", b_rate)) if "expected_recent_rate" in srow else b_rate
+        x_rate = float(srow.get("x_rate", 0.0)) if "x_rate" in srow else 0.0
+
+        lines_df = pd.DataFrame({
+            "dt": list(daily["dt"]) * 3,
+            "value": [b_rate] * len(daily) + [exp_rate] * len(daily) + [x_rate] * len(daily),
+            "type": (["기준선 b_rate"] * len(daily)) +
+                    (["최근 기대 expected_rate"] * len(daily)) +
+                    (["최근 실측 x_rate"] * len(daily)),
+        })
+
+        recent_start = TODAY - timedelta(days=RECENT_DAYS - 1)
+        band = alt.Chart(pd.DataFrame({"start": [recent_start], "end": [TODAY]})).mark_rect(
+            opacity=0.08, color="#E53935"
+        ).encode(x="start:T", x2="end:T")
+
+        points_sel = alt.Chart(daily[daily["has_selection"]]).mark_circle(size=55, opacity=0.75).encode(
+            x=alt.X("dt:T", title="일자"),
+            y=alt.Y("daily_rate:Q", title="일일 이물수준 (count/kg)", axis=alt.Axis(format=".4f")),
+            color=alt.value("#1E88E5"),
+            shape=alt.value("circle"),
+            tooltip=["dt:T", "count:Q", "selection_amount_kg:Q", "daily_rate:Q"],
         )
 
-        # 결합
-        usage = (usage_base
-                 .merge(samecrit_cnt, on=["plant","line","dt","lot_no"], how="left")
-                 .merge(same_lot_flag, on=["plant","line","dt","lot_no"], how="left")
-                 .fillna({"same_critical_count": 0, "same_lot": False})
-                 .sort_values(["same_lot","dt"], ascending=[False, False])
-                 )
-
-        st.markdown("##### ② 동일 원료(코드+업체)의 타 공장 사용 실적 (최근 180일)")
-        # lot_no 이름 그대로 유지
-        show_usage = usage.rename(columns={
-            "plant":"사업장","line":"선별라인","dt":"선별일자","same_lot":"same_lot"
-        })[["사업장","선별라인","선별일자","lot_no","usage_kg","same_critical_count","same_lot"]]
-
-        # 강조 컬럼
-        show_usage["⚠️"] = np.where(show_usage["same_lot"], "⚠️ 동일 LOT 사용", "")
-        st.dataframe(
-            show_usage[["⚠️","사업장","선별라인","선별일자","lot_no","usage_kg","same_critical_count"]],
-            use_container_width=True
-        )
-        st.download_button(
-            "② 사용 실적 CSV 다운로드",
-            data=show_usage.to_csv(index=False).encode("utf-8-sig"),
-            file_name=f"cross_plant_usage_{sel_mat}_{sel_sup}.csv"
+        points_nosel = alt.Chart(daily[~daily["has_selection"]]).mark_square(size=45, opacity=0.45).encode(
+            x=alt.X("dt:T"),
+            y=alt.Y("daily_rate:Q"),
+            color=alt.value("#9E9E9E"),
+            shape=alt.value("square"),
+            tooltip=["dt:T", alt.Tooltip("selection_amount_kg:Q", title="selection_kg")],
         )
 
-    # (C) 자동 경보 메시지 (타 공장 + 벤더)
-    st.markdown("##### ③ 자동 경보 메시지")
+        lines = alt.Chart(lines_df).mark_line(size=2).encode(
+            x="dt:T",
+            y=alt.Y("value:Q", title="일일 이물수준 (count/kg)", axis=alt.Axis(format=".4f")),
+            color=alt.Color("type:N", title=None),
+        )
 
-    # ③-1 타 공장용: ②의 요약(동일 LOT / same_critical_count 포함)도 함께 삽입
-    lines_to = []
-    lines_to.append("[자동경보] 치명적 이물 발생(금속/유리) – 동일 원료 사용 주의")
-    lines_to.append(f"- 원료: {sel_mname} (코드 {sel_mat}), 업체: {sel_sname} (코드 {sel_sup}), LOT: {sel_lot or '(미기재)'}")
-    lines_to.append(f"- 발생: {sel_dt} @ {sel_plant}/{sel_line}, 이물={sel_contam}, 건수={sel_cnt}, 당일 선별량={int(sel_kg)}kg")
-    lines_to.append("- 타 공장 사용/발생 요약(최근 180일):")
-    if not base180.empty and not usage.empty:
-        # 최신일 우선 상위 N줄 요약
-        for _, r in usage.sort_values("dt", ascending=False).head(20).iterrows():
-            lot_tag = " ⚠️동일LOT" if r.get("same_lot", False) else ""
-            lines_to.append(
-                f"  · {r['plant']} / {r['line']} @ {r['dt']} | lot_no={r['lot_no']} | 사용량={int(r['usage_kg'])}kg | "
-                f"동일이물발생건수={int(r['same_critical_count'])}{lot_tag}"
+        st.altair_chart((band + points_nosel + points_sel + lines).properties(height=360), use_container_width=True)
+        st.caption("• 원형=선별 有, 회색 사각형=선별 無  • 선: b_rate / expected_recent_rate / x_rate (기간 전체 동일 값)")
+
+        st.markdown("###### ▷ 업체 SPC 관리도(u-chart) (선별일수 ≥ 20일일 때 표시)")
+
+        sup_mask = (
+            (fdf["dt"] >= base_start) & (fdf["dt"] <= TODAY) &
+            (fdf["supplier_code"] == srow["supplier_code"]) &
+            (fdf["material_code"] == srow["material_code"]) &
+            (fdf["contam_type"] == srow["contam_type"])
+        )
+        sup_ts = fdf.loc[sup_mask, ["dt", "count", "selection_amount_kg"]].copy()
+
+        sup_daily = (
+            sup_ts.groupby("dt", as_index=False)
+                  .agg(count=("count", "sum"), kg=("selection_amount_kg", "sum"))
+                  .sort_values("dt")
+        )
+        sup_daily = sup_daily[sup_daily["kg"] > 0]
+
+        if len(sup_daily) < 20:
+            st.info(
+                f"SPC 표시 보류: 선택 조합 "
+                f"(supplier={srow['supplier_code']}, material={srow['material_code']}, contam={srow['contam_type']}) "
+                f"선별일 수가 {len(sup_daily)}일입니다. (≥ 20일 필요)"
             )
+        else:
+            ubar = sup_daily["count"].sum() / sup_daily["kg"].sum()
+            sup_daily["u"] = sup_daily["count"] / sup_daily["kg"]
+            sup_daily["ucl"] = ubar + 3.0 * np.sqrt(np.maximum(ubar, 0) / sup_daily["kg"])
+            sup_daily["lcl"] = np.maximum(0.0, ubar - 3.0 * np.sqrt(np.maximum(ubar, 0) / sup_daily["kg"]))
+            sup_daily["z"] = np.where(ubar > 0, (sup_daily["u"] - ubar) / np.sqrt(ubar / sup_daily["kg"]), 0.0)
+
+            u_line = alt.Chart(sup_daily).mark_line(color="#3949AB").encode(
+                x="dt:T", y=alt.Y("u:Q", title="결점률 u (count/kg)", axis=alt.Axis(format=".4f"))
+            )
+            cl_rule = alt.Chart(sup_daily).mark_rule(color="#00897B", strokeDash=[6, 4]).encode(
+                x="dt:T", y="mean(u):Q"
+            )
+            ucl_line = alt.Chart(sup_daily).mark_line(color="#E53935", strokeDash=[4, 3]).encode(
+                x="dt:T", y="ucl:Q"
+            )
+            lcl_line = alt.Chart(sup_daily).mark_line(color="#E53935", strokeDash=[4, 3]).encode(
+                x="dt:T", y="lcl:Q"
+            )
+            pts_spc = alt.Chart(sup_daily).mark_circle(size=50).encode(
+                x="dt:T", y="u:Q",
+                color=alt.condition(
+                    "datum.u > datum.ucl || datum.u < datum.lcl",
+                    alt.value("#E53935"),
+                    alt.value("#43A047"),
+                ),
+                tooltip=["dt:T", "count:Q", "kg:Q", "u:Q", "ucl:Q", "lcl:Q", "z:Q"],
+            )
+
+            st.altair_chart((ucl_line + lcl_line + cl_rule + u_line + pts_spc).properties(height=300),
+                            use_container_width=True)
+
+            n = len(sup_daily)
+            out_hi = int((sup_daily["u"] > sup_daily["ucl"]).sum())
+            out_lo = int((sup_daily["u"] < sup_daily["lcl"]).sum())
+            out_rate = (out_hi + out_lo) / n
+            z_abs_max = float(np.abs(sup_daily["z"]).max())
+
+            var_obs = float(np.var(sup_daily["count"] - sup_daily["kg"] * ubar, ddof=1))
+            var_exp = float(np.mean(sup_daily["kg"] * ubar))
+            overdisp = var_obs > 1.5 * var_exp
+
+            verdict = []
+            if out_rate >= 0.05 or z_abs_max >= 3.5:
+                verdict.append("**관리불량(경보 수준)**: 관리한계 위반율이 높거나 극단치가 큼.")
+            elif out_rate >= 0.02 or z_abs_max >= 3.0:
+                verdict.append("**주의 필요**: 변동성이 커지고 있음.")
+            else:
+                verdict.append("**관리양호**: 통계적으로 안정적인 수준.")
+            if overdisp:
+                verdict.append("**과산포 의심**: 단순 포아송 가정보다 산포가 큽니다.")
+
+            actions = [
+                "- **자석·체·금속검출기** 점검 주기 단축 및 감도 재검증",
+                "- **LOT별 이물 이력** 사전심사(입고검사 강화), 고위험 LOT 선별 우선",
+                "- **설비 청결/세척 SOP** 강화, 교대/작업자 편차 모니터링",
+                "- **선별량/속도 최적화**로 과부하 구간 제거",
+            ]
+            st.markdown("**통계 평가:** " + " ".join(verdict))
+            st.markdown("**개선 제안:**")
+            st.markdown("\n".join([f"  {a}" for a in actions]))
+
+        st.markdown("#### 🔎 최근 2일 치명적 이물 원료 추적 & 교차공장 사용 이력")
+
+        def _crit_key(x):
+            s = str(x).strip().lower()
+            if any(k in s for k in ["금속", "metal"]):
+                return "metal"
+            if any(k in s for k in ["유리", "glass"]):
+                return "glass"
+            return None
+
+        last2_start = TODAY - timedelta(days=1)
+        mask_last2_crit = (
+            (fdf["dt"] >= last2_start) & (fdf["dt"] <= TODAY) &
+            (fdf["count"] > 0) &
+            fdf["contam_type"].apply(lambda v: _crit_key(v) is not None)
+        )
+
+        cols_needed = [
+            "dt", "plant", "line", "lot_no", "contam_type", "count", "selection_amount_kg",
+            "material_code", "material_name", "supplier_code", "supplier_name", "material_type",
+        ]
+        for c in cols_needed:
+            if c not in fdf.columns:
+                fdf[c] = "" if c not in ["count", "selection_amount_kg"] else 0
+
+        crit_last2_raw = fdf.loc[mask_last2_crit, cols_needed].copy()
+        crit_last2_raw["crit_key"] = crit_last2_raw["contam_type"].map(_crit_key)
+
+        if crit_last2_raw.empty:
+            st.info("최근 2일 내 치명적 이물(금속/유리) 발생 데이터가 없습니다.")
+            return
+
+        grp_cols = ["plant", "line", "dt", "lot_no", "contam_type", "material_code", "supplier_code"]
+        crit_last2 = (
+            crit_last2_raw
+            .groupby(grp_cols, as_index=False)
+            .agg(
+                발생건수=("count", "sum"),
+                selection_amount_kg=("selection_amount_kg", "sum"),
+                material_name=("material_name", "first"),
+                supplier_name=("supplier_name", "first"),
+                material_type=("material_type", "first"),
+                crit_key=("crit_key", "first"),
+            )
+            .sort_values(["dt", "plant", "line"], ascending=[False, True, True])
+        )
+
+        st.markdown("##### ① 최근 2일 치명적 이물 발생 목록")
+        st.dataframe(
+            crit_last2[[
+                "plant", "line", "dt", "lot_no", "contam_type", "발생건수", "selection_amount_kg",
+                "material_code", "supplier_code", "material_name", "supplier_name", "material_type",
+            ]],
+            use_container_width=True,
+        )
+
+        def _lab(r):
+            return (
+                f"{r['dt']} | {r['plant']} | {r['line']} | lot_no={r['lot_no']} | "
+                f"{r['contam_type']} | {r['material_code']} | {r['supplier_code']}"
+            )
+
+        crit_last2["label"] = crit_last2.apply(_lab, axis=1)
+
+        sel_label = st.selectbox(
+            "원료 선택 (→ 동일 원료의 타 공장 사용 이력 조회)",
+            options=crit_last2["label"].tolist(),
+        )
+        sel = crit_last2[crit_last2["label"] == sel_label].iloc[0]
+
+        sel_mat = sel["material_code"]
+        sel_sup = sel["supplier_code"]
+        sel_lot = str(sel["lot_no"]) if pd.notna(sel["lot_no"]) else ""
+        sel_plant = sel["plant"]
+        sel_line = sel["line"]
+        sel_dt = sel["dt"]
+        sel_contam = sel["contam_type"]
+        sel_crit = sel["crit_key"]
+        sel_cnt = int(sel["발생건수"])
+        sel_kg = float(sel["selection_amount_kg"])
+        sel_mname = sel["material_name"]
+        sel_sname = sel["supplier_name"]
+
+        search_start = baseline_start
+        base180 = fdf[
+            (fdf["dt"] >= search_start) & (fdf["dt"] <= TODAY) &
+            (fdf["material_code"] == sel_mat) &
+            (fdf["supplier_code"] == sel_sup) &
+            (fdf["plant"] != sel_plant)
+        ].copy()
+        base180["crit_key"] = base180["contam_type"].map(_crit_key)
+
+        if base180.empty:
+            st.info("최근 180일 동안 동일 원료(코드+업체)의 타 공장 사용 실적이 없습니다.")
+            usage = pd.DataFrame()
+        else:
+            base180["same_lot"] = False
+            if sel_lot.strip():
+                base180["same_lot"] = base180["lot_no"].astype(str).eq(sel_lot)
+
+            unique_usage_col = "selection_amount_kg_unique" if "selection_amount_kg_unique" in base180.columns else "selection_amount_kg"
+
+            usage_base = (
+                base180.groupby(["plant", "line", "dt", "lot_no"], as_index=False)
+                       .agg(usage_kg=(unique_usage_col, "sum"))
+            )
+
+            samecrit = base180[base180["crit_key"] == sel_crit]
+            samecrit_cnt = (
+                samecrit.groupby(["plant", "line", "dt", "lot_no"], as_index=False)
+                        .agg(same_critical_count=("count", "sum"))
+            )
+
+            same_lot_flag = (
+                base180.groupby(["plant", "line", "dt", "lot_no"], as_index=False)
+                       .agg(same_lot=("same_lot", "max"))
+            )
+
+            usage = (
+                usage_base
+                .merge(samecrit_cnt, on=["plant", "line", "dt", "lot_no"], how="left")
+                .merge(same_lot_flag, on=["plant", "line", "dt", "lot_no"], how="left")
+                .fillna({"same_critical_count": 0, "same_lot": False})
+                .sort_values(["same_lot", "dt"], ascending=[False, False])
+            )
+
+            st.markdown("##### ② 동일 원료(코드+업체)의 타 공장 사용 실적 (최근 180일)")
+            show_usage = usage.rename(columns={
+                "plant": "사업장", "line": "선별라인", "dt": "선별일자", "same_lot": "same_lot",
+            })[["사업장", "선별라인", "선별일자", "lot_no", "usage_kg", "same_critical_count", "same_lot"]]
+
+            show_usage["⚠️"] = np.where(show_usage["same_lot"], "⚠️ 동일 LOT 사용", "")
+            st.dataframe(
+                show_usage[["⚠️", "사업장", "선별라인", "선별일자", "lot_no", "usage_kg", "same_critical_count"]],
+                use_container_width=True,
+            )
+            st.download_button(
+                "② 사용 실적 CSV 다운로드",
+                data=show_usage.to_csv(index=False).encode("utf-8-sig"),
+                file_name=f"cross_plant_usage_{sel_mat}_{sel_sup}.csv",
+            )
+
+        st.markdown("##### ③ 자동 경보 메시지")
+
+        lines_to = []
+        lines_to.append("[자동경보] 치명적 이물 발생(금속/유리) – 동일 원료 사용 주의")
+        lines_to.append(
+            f"- 원료: {sel_mname} (코드 {sel_mat}), 업체: {sel_sname} (코드 {sel_sup}), LOT: {sel_lot or '(미기재)'}"
+        )
+        lines_to.append(
+            f"- 발생: {sel_dt} @ {sel_plant}/{sel_line}, 이물={sel_contam}, 건수={sel_cnt}, 당일 선별량={int(sel_kg)}kg"
+        )
+        lines_to.append("- 타 공장 사용/발생 요약(최근 180일):")
+        if not base180.empty and not usage.empty:
+            for _, r in usage.sort_values("dt", ascending=False).head(20).iterrows():
+                lot_tag = " ⚠️동일LOT" if r.get("same_lot", False) else ""
+                lines_to.append(
+                    f"  · {r['plant']} / {r['line']} @ {r['dt']} | lot_no={r['lot_no']} | 사용량={int(r['usage_kg'])}kg | "
+                    f"동일이물발생건수={int(r['same_critical_count'])}{lot_tag}"
+                )
+        else:
+            lines_to.append("  · 동일 원료의 타 공장 사용 이력이 없거나 집계 데이터가 없습니다.")
+
+        lines_to.append("- 조치 요청:")
+        lines_to.append("  1) 해당 원료(가능 시 동일 LOT) **즉시 사용 중지(Hold)**")
+        lines_to.append("  2) 창고/라인 **재고 및 사용 이력 확인**, 동일 LOT 사용 여부 점검")
+        lines_to.append("  3) 금속검출/이물선별 **보강 검사** 시행")
+        lines_to.append("  4) 결과 회신 및 조치 완료 보고")
+
+        msg_to_plants = "\n".join(lines_to)
+        st.text_area("타 공장 경보문", value=msg_to_plants, height=280)
+        st.download_button(
+            "타 공장 경보문 .txt",
+            data=msg_to_plants.encode("utf-8-sig"),
+            file_name=f"alert_to_plants_{sel_mat}_{sel_sup}_{sel_lot or 'nolot'}.txt",
+        )
+
+        lines_v = []
+        lines_v.append("[요청] 치명적 이물(금속/유리) 발생 관련 원인조사 및 CAPA 제출")
+        lines_v.append(f"- 원료명/코드: {sel_mname} / {sel_mat}")
+        lines_v.append(f"- 업체명/코드: {sel_sname} / {sel_sup}")
+        lines_v.append(f"- LOT: {sel_lot or '(미기재)'}")
+        lines_v.append(
+            f"- 발생정보: {sel_dt} @ {sel_plant}/{sel_line}, 이물={sel_contam}, 건수={sel_cnt}, 당일 선별량={int(sel_kg)}kg"
+        )
+        lines_v.append("- 요청사항:")
+        lines_v.append("  1) 해당 LOT 포함 출하분 **전량 출하정지(Hold)** 및 재고 격리")
+        lines_v.append("  2) **원인 분석**(공정/원자재/설비/인력/세척/자석·체 분리장치 점검)")
+        lines_v.append("  3) **근본대책(CAPA)** 수립 및 예방조치 계획(기한 포함)")
+        lines_v.append("  4) **동일 LOT/동일 설비** 생산분의 추적자료 및 검사성적서(COA) 제출")
+        lines_v.append("  5) 회신 기한: 영업일 기준 3일 내 1차 회신, 10일 내 최종 보고")
+        msg_to_vendor = "\n".join(lines_v)
+
+        st.text_area("벤더/제조업체 통지문", value=msg_to_vendor, height=260)
+        st.download_button(
+            "벤더 통지문 .txt",
+            data=msg_to_vendor.encode("utf-8-sig"),
+            file_name=f"notice_to_vendor_{sel_mat}_{sel_sup}_{sel_lot or 'nolot'}.txt",
+        )
+
+    if surge_df is None or surge_df.empty:
+        st.info("표시할 조합이 없습니다.")
     else:
-        lines_to.append("  · 동일 원료의 타 공장 사용 이력이 없거나 집계 데이터가 없습니다.")
-
-    lines_to.append("- 조치 요청:")
-    lines_to.append("  1) 해당 원료(가능 시 동일 LOT) **즉시 사용 중지(Hold)**")
-    lines_to.append("  2) 창고/라인 **재고 및 사용 이력 확인**, 동일 LOT 사용 여부 점검")
-    lines_to.append("  3) 금속검출/이물선별 **보강 검사** 시행")
-    lines_to.append("  4) 결과 회신 및 조치 완료 보고")
-
-    msg_to_plants = "\n".join(lines_to)
-    st.text_area("타 공장 경보문", value=msg_to_plants, height=280)
-    st.download_button("타 공장 경보문 .txt", data=msg_to_plants.encode("utf-8-sig"),
-                       file_name=f"alert_to_plants_{sel_mat}_{sel_sup}_{sel_lot or 'nolot'}.txt")
-
-    # ③-2 벤더/제조업체용
-    lines_v = []
-    lines_v.append("[요청] 치명적 이물(금속/유리) 발생 관련 원인조사 및 CAPA 제출")
-    lines_v.append(f"- 원료명/코드: {sel_mname} / {sel_mat}")
-    lines_v.append(f"- 업체명/코드: {sel_sname} / {sel_sup}")
-    lines_v.append(f"- LOT: {sel_lot or '(미기재)'}")
-    lines_v.append(f"- 발생정보: {sel_dt} @ {sel_plant}/{sel_line}, 이물={sel_contam}, 건수={sel_cnt}, 당일 선별량={int(sel_kg)}kg")
-    lines_v.append("- 요청사항:")
-    lines_v.append("  1) 해당 LOT 포함 출하분 **전량 출하정지(Hold)** 및 재고 격리")
-    lines_v.append("  2) **원인 분석**(공정/원자재/설비/인력/세척/자석·체 분리장치 점검)")
-    lines_v.append("  3) **근본대책(CAPA)** 수립 및 예방조치 계획(기한 포함)")
-    lines_v.append("  4) **동일 LOT/동일 설비** 생산분의 추적자료 및 검사성적서(COA) 제출")
-    lines_v.append("  5) 회신 기한: 영업일 기준 3일 내 1차 회신, 10일 내 최종 보고")
-    msg_to_vendor = "\n".join(lines_v)
-
-    st.text_area("벤더/제조업체 통지문", value=msg_to_vendor, height=260)
-    st.download_button("벤더 통지문 .txt", data=msg_to_vendor.encode("utf-8-sig"),
-                       file_name=f"notice_to_vendor_{sel_mat}_{sel_sup}_{sel_lot or 'nolot'}.txt")
-
+        render_alert_details()
 
 # -----------------------------
 # ③ 액션 템플릿 (화면 출력 + 복사 + txt)
