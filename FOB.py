@@ -2,13 +2,16 @@
 # V5 schema + rate-based alerts + dependent filters + chart axis toggle + XLSX engine fallback
 
 import io
+import json
 import re
 from datetime import datetime, timedelta, date
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as components
+import pydeck as pdk
 
 # 시각화(축 전환/레이어링)를 위해 Altair 사용
 import altair as alt
@@ -18,6 +21,7 @@ import altair as alt
 # -----------------------------
 st.set_page_config(page_title="FOCast - 이물 분석·알림", layout="wide", initial_sidebar_state="expanded")
 APP_TITLE = "FOCast – 이물 분석·알림 웹앱"
+HIGH_RISK_STATE_PATH = Path(".high_risk_state.json")
 
 # V5 스키마 (stage 제거, material_type 추가)
 REQUIRED_COLUMNS = [
@@ -36,6 +40,145 @@ REQUIRED_COLUMNS = [
 DEFAULT_RECENT_DAYS = 7
 DEFAULT_BASELINE_DAYS = 180
 SURGE_Z_THRESHOLD = 3.0  # z >= 3 상승, z <= -3 하락
+
+COUNTRY_CENTROIDS = {
+    # WGS84 국가 중심 좌표 (ISO 공식 국호 기반, 주요 별칭 포함)
+    "Afghanistan": (33.93911, 67.709953),
+    "Albania": (41.153332, 20.168331),
+    "Algeria": (28.033886, 1.659626),
+    "Argentina": (-38.416097, -63.616672),
+    "Armenia": (40.069099, 45.038189),
+    "Australia": (-25.274398, 133.775136),
+    "Austria": (47.516231, 14.550072),
+    "Azerbaijan": (40.143105, 47.576927),
+    "Bangladesh": (23.684994, 90.356331),
+    "Belarus": (53.709807, 27.953389),
+    "Belgium": (50.503887, 4.469936),
+    "Bolivia": (-16.290154, -63.588653),
+    "Bosnia and Herzegovina": (43.915886, 17.679076),
+    "Botswana": (-22.328474, 24.684866),
+    "Brazil": (-14.235004, -51.92528),
+    "Bulgaria": (42.733883, 25.48583),
+    "Cambodia": (12.565679, 104.990963),
+    "Cameroon": (7.369722, 12.354722),
+    "Canada": (56.130366, -106.346771),
+    "Chile": (-35.675147, -71.542969),
+    "China": (35.86166, 104.195397),
+    "Colombia": (4.570868, -74.297333),
+    "Costa Rica": (9.748917, -83.753428),
+    "Côte d'Ivoire": (7.539989, -5.54708),
+    "Croatia": (45.1, 15.2),
+    "Cuba": (21.521757, -77.781167),
+    "Cyprus": (35.126413, 33.429859),
+    "Czechia": (49.817492, 15.472962),
+    "Democratic Republic of the Congo": (-4.038333, 21.758664),
+    "Denmark": (56.26392, 9.501785),
+    "Dominican Republic": (18.735693, -70.162651),
+    "Ecuador": (-1.831239, -78.183406),
+    "Egypt": (26.820553, 30.802498),
+    "El Salvador": (13.794185, -88.89653),
+    "Estonia": (58.595272, 25.013607),
+    "Ethiopia": (9.145, 40.489673),
+    "Finland": (61.92411, 25.748151),
+    "France": (46.227638, 2.213749),
+    "Germany": (51.165691, 10.451526),
+    "Ghana": (7.946527, -1.023194),
+    "Greece": (39.074208, 21.824312),
+    "Guatemala": (15.783471, -90.230759),
+    "Hong Kong": (22.3193039, 114.1693611),
+    "Hungary": (47.162494, 19.503304),
+    "Iceland": (64.963051, -19.020835),
+    "India": (20.593684, 78.96288),
+    "Indonesia": (-0.789275, 113.921327),
+    "Iran": (32.427908, 53.688046),
+    "Iraq": (33.223191, 43.679291),
+    "Ireland": (53.41291, -8.24389),
+    "Israel": (31.046051, 34.851612),
+    "Italy": (41.87194, 12.56738),
+    "Japan": (36.204824, 138.252924),
+    "Jordan": (30.585164, 36.238414),
+    "Kazakhstan": (48.019573, 66.923684),
+    "Kenya": (-0.023559, 37.906193),
+    "Kuwait": (29.31166, 47.481766),
+    "Laos": (19.85627, 102.495496),
+    "Latvia": (56.879635, 24.603189),
+    "Lebanon": (33.854721, 35.862285),
+    "Lithuania": (55.169438, 23.881275),
+    "Luxembourg": (49.815273, 6.129583),
+    "Madagascar": (-18.766947, 46.869107),
+    "Malaysia": (4.210484, 101.975766),
+    "Mexico": (23.634501, -102.552784),
+    "Mongolia": (46.862496, 103.846656),
+    "Morocco": (31.791702, -7.09262),
+    "Myanmar": (21.913965, 95.956223),
+    "Namibia": (-22.95764, 18.49041),
+    "Nepal": (28.394857, 84.124008),
+    "Netherlands": (52.132633, 5.291266),
+    "New Zealand": (-40.900557, 174.885971),
+    "Nigeria": (9.081999, 8.675277),
+    "North Macedonia": (41.608635, 21.745275),
+    "Norway": (60.472024, 8.468946),
+    "Pakistan": (30.375321, 69.345116),
+    "Panama": (8.537981, -80.782127),
+    "Paraguay": (-23.442503, -58.443832),
+    "Peru": (-9.189967, -75.015152),
+    "Philippines": (12.879721, 121.774017),
+    "Poland": (51.919438, 19.145136),
+    "Portugal": (39.399872, -8.224454),
+    "Qatar": (25.354826, 51.183884),
+    "Republic of Korea": (36.5, 127.8),
+    "Romania": (45.943161, 24.96676),
+    "Russia": (61.52401, 105.318756),
+    "Saudi Arabia": (23.885942, 45.079162),
+    "Serbia": (44.016521, 21.005859),
+    "Singapore": (1.352083, 103.819836),
+    "Slovakia": (48.669026, 19.699024),
+    "Slovenia": (46.151241, 14.995463),
+    "South Africa": (-30.559482, 22.937506),
+    "South Korea": (36.5, 127.8),
+    "Spain": (40.463667, -3.74922),
+    "Sri Lanka": (7.873054, 80.771797),
+    "Sweden": (60.128161, 18.643501),
+    "Switzerland": (46.818188, 8.227512),
+    "Taiwan": (23.69781, 120.960515),
+    "Tanzania": (-6.369028, 34.888822),
+    "Thailand": (15.870032, 100.992541),
+    "Tunisia": (33.886917, 9.537499),
+    "Türkiye": (38.963745, 35.243322),
+    "Uganda": (1.373333, 32.290275),
+    "Ukraine": (48.379433, 31.16558),
+    "United Arab Emirates": (23.424076, 53.847818),
+    "United Kingdom": (55.378051, -3.435973),
+    "United States": (37.09024, -95.712891),
+    "United States of America": (37.09024, -95.712891),
+    "Uruguay": (-32.522779, -55.765835),
+    "USA": (37.09024, -95.712891),
+    "Uzbekistan": (41.377491, 64.585262),
+    "Venezuela": (6.42375, -66.58973),
+    "Vietnam": (14.058324, 108.277199),
+    "Zimbabwe": (-19.015438, 29.154857),
+}
+
+ORIGIN_ALIASES = {
+    "대한민국": "South Korea",
+    "한국": "South Korea",
+    "Korea": "South Korea",
+    "미국": "United States",
+    "中國": "China",
+    "중국": "China",
+    "일본": "Japan",
+    "베트남": "Vietnam",
+    "인도네시아": "Indonesia",
+    "대만": "Taiwan",
+    "홍콩": "Hong Kong",
+    "영국": "United Kingdom",
+    "독일": "Germany",
+    "프랑스": "France",
+    "이탈리아": "Italy",
+    "멕시코": "Mexico",
+    "브라질": "Brazil",
+    "터키": "Türkiye",
+}
 
 st.title(APP_TITLE)
 
@@ -159,6 +302,25 @@ def ensure_columns(df: pd.DataFrame) -> pd.DataFrame:
         df[c] = df[c].fillna("").astype(str)
 
     return df
+
+
+def normalize_origin_name(origin: str) -> str:
+    """원산지 문자열을 글로벌 표준 국호로 정규화."""
+    if origin is None:
+        return ""
+    raw = str(origin).strip()
+    if not raw:
+        return ""
+
+    # 우선 별칭 매핑(대소문자/언어 변형)
+    if raw in ORIGIN_ALIASES:
+        return ORIGIN_ALIASES[raw]
+
+    lower_map = {k.lower(): v for k, v in ORIGIN_ALIASES.items()}
+    if raw.lower() in lower_map:
+        return lower_map[raw.lower()]
+
+    return raw
 
 def split_tags(s: str):
     if not isinstance(s, str):
@@ -346,12 +508,48 @@ st.session_state.setdefault("pivot_df", None)
 st.session_state.setdefault("alerts_novel", None)
 st.session_state.setdefault("alerts_surge", None)
 st.session_state.setdefault("filtered_df", None)
+st.session_state.setdefault("high_risk_df", pd.DataFrame())
+st.session_state.setdefault("high_risk_options", {})
+st.session_state.setdefault("high_risk_loaded_from_disk", False)
+
+
+def load_high_risk_state_from_disk():
+    if st.session_state.get("high_risk_loaded_from_disk"):
+        return
+    if HIGH_RISK_STATE_PATH.exists():
+        try:
+            data = json.loads(HIGH_RISK_STATE_PATH.read_text(encoding="utf-8"))
+            items = data.get("items", [])
+            opts = data.get("options", {})
+            st.session_state["high_risk_df"] = pd.DataFrame(items)
+            st.session_state["high_risk_options"] = opts
+            st.success("저장된 고위험 리스트 상태를 자동 복원했습니다.")
+        except Exception:
+            st.warning("서버 측 저장된 고위험 상태를 읽는 중 문제가 발생했습니다. 새로 구성해주세요.")
+    st.session_state["high_risk_loaded_from_disk"] = True
+
+
+load_high_risk_state_from_disk()
+
+
+def persist_high_risk_state(df: pd.DataFrame, options: dict):
+    try:
+        payload = {
+            "items": df.to_dict("records"),
+            "options": options or {},
+        }
+        HIGH_RISK_STATE_PATH.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        return True
+    except Exception:
+        return False
 
 # -----------------------------
 # 탭 구성
 # -----------------------------
-tab1, tab2, tab3, tab4 = st.tabs([
-    "① 피벗/필터 검색", "② 경보 보드", "③ 액션 템플릿", "④ 내보내기"
+tab1, tab2, tab3, tab4, tab5 = st.tabs([
+    "① 피벗/필터 검색", "② 경보 보드", "③ 액션 템플릿", "④ 내보내기", "⑤ 고위험·지도"
 ])
 
 # -----------------------------
@@ -1211,5 +1409,196 @@ with tab4:
                 pass
 
     st.download_button("엑셀 보고서(XLSX) 다운로드", data=output.getvalue(), file_name="FOCast_report.xlsx")
+
+# -----------------------------
+# ⑤ 고위험 리스트 & 지도 시각화
+# -----------------------------
+with tab5:
+    st.subheader("고위험 원료 선정 · 원산지 지표맵")
+
+    base_candidates = st.session_state.get("filtered_df", df).copy()
+    if base_candidates.empty:
+        st.info("탭① 필터에서 데이터를 만든 뒤 고위험 후보를 선택하세요.")
+    else:
+        type_pool = sorted([t for t in base_candidates["material_type"].unique() if str(t).strip()])
+        type_filter = st.multiselect("원료대분류(material_type) 필터", type_pool, key="high_risk_material_type")
+
+        candidate = base_candidates.copy()
+        if type_filter:
+            candidate = candidate[candidate["material_type"].isin(type_filter)]
+
+        option_map = {}
+        for _, row in (
+            candidate[["material_code", "material_name", "supplier_name", "origin"]]
+            .dropna(subset=["material_code"])
+            .drop_duplicates()
+            .iterrows()
+        ):
+            label = f"{row.material_name} ({row.material_code}) / {row.supplier_name} / {row.origin or '원산지 미기재'}"
+            option_map[label] = row.material_code
+
+        st.caption("검색과 원산지 필터를 이용해 후보를 줄인 뒤, 다중 선택으로 고위험 리스트를 정의하세요.")
+        selected_labels = st.multiselect("고위험 후보(다중 선택)", list(option_map.keys()), key="high_risk_candidates")
+        selected_codes = [option_map[lbl] for lbl in selected_labels]
+        selected_df = candidate[candidate["material_code"].isin(selected_codes)]
+
+        col_add, col_replace = st.columns(2)
+        if col_add.button("선택 항목을 고위험 리스트에 추가/병합", use_container_width=True):
+            merged = pd.concat([st.session_state.get("high_risk_df", pd.DataFrame()), selected_df], ignore_index=True)
+            if not merged.empty:
+                merged = merged.drop_duplicates(subset=["material_code", "supplier_code", "origin"], keep="first")
+            st.session_state["high_risk_df"] = merged
+            st.success(f"{len(selected_df)}개 항목을 고위험 리스트에 병합했습니다.")
+        if col_replace.button("선택만으로 고위험 리스트 덮어쓰기", use_container_width=True):
+            st.session_state["high_risk_df"] = selected_df.copy()
+            st.success("선택 항목으로 고위험 리스트를 덮어썼습니다.")
+
+        st.dataframe(selected_df.head(200), use_container_width=True)
+
+        st.markdown("#### 알림/경보 강화 옵션")
+        opts_prev = st.session_state.get("high_risk_options", {}) or {}
+        opt1 = st.selectbox(
+            "경보 강도", ["표준", "강화", "매우 강화"],
+            index={"표준": 0, "강화": 1, "매우 강화": 2}.get(opts_prev.get("alert_level", "강화"), 1),
+            key="high_risk_alert_level",
+        )
+        opt2 = st.checkbox("반복 발생 시 재알림", value=opts_prev.get("repeat", True), key="high_risk_repeat")
+        opt3 = st.checkbox("임계 초과 시 즉시 경보/푸시", value=opts_prev.get("escalate", True), key="high_risk_escalate")
+        st.session_state["high_risk_options"] = {
+            "alert_level": opt1,
+            "repeat": opt2,
+            "escalate": opt3,
+        }
+
+        st.markdown("#### 로컬 저장/불러오기 · 상태 복원")
+        risk_df = st.session_state.get("high_risk_df", pd.DataFrame())
+        with st.expander("고위험 리스트 저장/불러오기"):
+            if not risk_df.empty:
+                st.download_button(
+                    "CSV로 저장", data=risk_df.to_csv(index=False).encode("utf-8-sig"), file_name="high_risk_list.csv"
+                )
+                st.download_button(
+                    "JSON으로 저장", data=risk_df.to_json(orient="records", force_ascii=False, indent=2), file_name="high_risk_list.json"
+                )
+                if st.button("서버 측 자동복원 파일로 저장", use_container_width=True):
+                    ok = persist_high_risk_state(risk_df, st.session_state.get("high_risk_options", {}))
+                    if ok:
+                        st.success("서버 측에 저장 완료 – 다음 접속 시 자동 복원됩니다.")
+                    else:
+                        st.error("서버 측에 저장하지 못했습니다. 권한을 확인하세요.")
+            loader = st.file_uploader("저장한 고위험 리스트 불러오기(csv/json)", type=["csv", "json"], key="high_risk_loader")
+            if loader:
+                try:
+                    if loader.name.lower().endswith(".json"):
+                        loaded_items = json.load(loader)
+                        loaded_df = pd.DataFrame(loaded_items)
+                    else:
+                        loaded_df = pd.read_csv(loader)
+                    if not loaded_df.empty:
+                        loaded_df = ensure_columns(loaded_df)
+                        st.session_state["high_risk_df"] = loaded_df
+                        st.success(f"{len(loaded_df)}개 항목을 불러와 고위험 리스트를 복원했습니다.")
+                    else:
+                        st.warning("불러온 파일에 데이터가 없습니다.")
+                except Exception as e:
+                    st.error(f"불러오기 실패: {e}")
+
+        st.markdown("#### 원산지별 이물 건/kg 지표 및 지도")
+        risk_df = st.session_state.get("high_risk_df", pd.DataFrame())
+        if risk_df.empty:
+            st.info("고위험 리스트가 비어 있습니다. 후보를 추가해주세요.")
+        else:
+            origin_metrics = (
+                risk_df.groupby("origin", dropna=False)
+                .agg(count_sum=("count", "sum"), kg_sum=("selection_amount_kg", "sum"))
+                .reset_index()
+            )
+            origin_metrics["origin"].fillna("(미기재)", inplace=True)
+            origin_metrics["origin_std"] = origin_metrics["origin"].apply(normalize_origin_name)
+            origin_metrics["origin_std"].replace("", "(미기재)", inplace=True)
+            origin_metrics["origin_for_plot"] = origin_metrics["origin_std"]
+            origin_metrics["rate_per_kg"] = np.where(
+                origin_metrics["kg_sum"] > 0,
+                origin_metrics["count_sum"] / origin_metrics["kg_sum"],
+                0.0,
+            )
+            st.dataframe(
+                origin_metrics[["origin", "origin_std", "count_sum", "kg_sum", "rate_per_kg"]],
+                use_container_width=True,
+            )
+
+            max_rate = float(origin_metrics["rate_per_kg"].max()) if not origin_metrics.empty else 0.0
+            max_rate = max(max_rate, 1e-6)
+            world = alt.topo_feature("https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json", "countries")
+            map_chart = (
+                alt.Chart(world)
+                .mark_geoshape(stroke="#f5f5f5", strokeWidth=0.5)
+                .transform_lookup(
+                    lookup="properties.name",
+                    from_=alt.LookupData(
+                        origin_metrics, "origin_for_plot", ["rate_per_kg", "count_sum", "kg_sum", "origin", "origin_for_plot"]
+                    ),
+                )
+                .encode(
+                    color=alt.Color(
+                        "rate_per_kg:Q",
+                        title="건/선별kg",
+                        scale=alt.Scale(scheme="orangered", domain=[0, max_rate]),
+                    ),
+                    tooltip=["origin:N", "count_sum:Q", "kg_sum:Q", alt.Tooltip("rate_per_kg:Q", format=".4f")],
+                )
+                .project(type="equalEarth")
+                .properties(height=380)
+            )
+            st.altair_chart(map_chart, use_container_width=True)
+
+            geo_ready = origin_metrics.copy()
+            geo_ready[["lat", "lon"]] = geo_ready["origin_for_plot"].map(COUNTRY_CENTROIDS).apply(pd.Series)
+            geo_ready = geo_ready.dropna(subset=["lat", "lon"])
+            if not geo_ready.empty:
+                geo_ready["rate_scaled"] = geo_ready["rate_per_kg"] * 1e6
+                geo_ready["rate_scaled"] = geo_ready["rate_scaled"].clip(upper=1e6)
+                column_layer = pdk.Layer(
+                    "ColumnLayer",
+                    data=geo_ready,
+                    get_position="[lon, lat]",
+                    get_elevation="rate_scaled",
+                    elevation_scale=1,
+                    radius=150000,
+                    get_fill_color="[255, 87, 34, 180]",
+                    pickable=True,
+                )
+                view_state = pdk.ViewState(latitude=20, longitude=0, zoom=0.8, pitch=20)
+                st.pydeck_chart(
+                    pdk.Deck(
+                        layers=[column_layer],
+                        initial_view_state=view_state,
+                        tooltip={
+                            "text": "{origin}\n건수: {count_sum}\n선별kg: {kg_sum}\n건/선별kg: {rate_per_kg}"}
+                    )
+                )
+            else:
+                st.info("지도 좌표와 매칭되는 원산지가 없어 3D 레이어를 표시하지 않습니다.")
+
+            report_lines = [
+                "[고위험 리스트 보고서]",
+                f"- 경보 강도: {st.session_state['high_risk_options'].get('alert_level', '강화')}",
+                f"- 반복 알림: {'ON' if st.session_state['high_risk_options'].get('repeat', True) else 'OFF'}",
+                f"- 즉시 경보: {'ON' if st.session_state['high_risk_options'].get('escalate', True) else 'OFF'}",
+                f"- 대상 원료 수: {len(risk_df)}",
+                f"- 원산지 수: {origin_metrics['origin'].nunique()}",
+                "",
+                "[원산지별 요약]",
+            ]
+            for _, r in origin_metrics.iterrows():
+                report_lines.append(
+                    f"• {r['origin']}: 건수 {int(r['count_sum'])}, 선별kg {r['kg_sum']:.2f}, 건/선별kg {r['rate_per_kg']:.6f}"
+                )
+            report_text = "\n".join(report_lines)
+            st.download_button(
+                "고위험 보고서(.txt) 다운로드",
+                data=report_text.encode("utf-8-sig"),
+                file_name="high_risk_report.txt",
+            )
 
 st.caption("※ 고도화: rate 임계치 정책/가중, LOT↔제품 트레이스, 자동 메일/Teams 전송(Graph API) 등 확장 가능.")
