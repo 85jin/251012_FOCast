@@ -201,6 +201,41 @@ def ensure_columns(df: pd.DataFrame) -> pd.DataFrame:
 
     return df
 
+
+def normalize_origin_name(origin: str) -> str:
+    """원산지 문자열을 글로벌 표준 국호로 정규화."""
+    if origin is None:
+        return ""
+    raw = str(origin).strip()
+    if not raw:
+        return ""
+
+    # 괄호/구분자를 제거하여 ISO 코드, 국호 혼합 입력을 보정
+    cleaned = re.sub(r"[()\[\]]", " ", raw).replace("／", "/")
+    tokens = [t for t in re.split(r"[/,;]|\s+", cleaned) if t]
+    candidate_tokens = [cleaned, raw] + tokens
+
+    lower_map = {k.lower(): v for k, v in ORIGIN_ALIASES.items()}
+    iso_map = {k.lower(): v for k, v in ISO_COUNTRY_CODES.items()}
+
+    for cand in candidate_tokens:
+        if cand in ORIGIN_ALIASES:
+            return ORIGIN_ALIASES[cand]
+        if cand.lower() in lower_map:
+            return lower_map[cand.lower()]
+        if cand.upper() in ISO_COUNTRY_CODES:
+            return ISO_COUNTRY_CODES[cand.upper()]
+        if cand.lower() in iso_map:
+            return iso_map[cand.lower()]
+        if cand in COUNTRY_CENTROIDS:
+            return cand
+
+    centroid_lower = {k.lower(): k for k in COUNTRY_CENTROIDS.keys()}
+    if raw.lower() in centroid_lower:
+        return centroid_lower[raw.lower()]
+
+    return raw
+
 def split_tags(s: str):
     if not isinstance(s, str):
         return []
