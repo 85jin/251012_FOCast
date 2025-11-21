@@ -159,6 +159,34 @@ COUNTRY_CENTROIDS = {
     "Zimbabwe": (-19.015438, 29.154857),
 }
 
+# ISO 코드 기반 글로벌 표준 국호 매핑 (alpha-2 / alpha-3 → 영문 공식명)
+ISO_COUNTRY_CODES = {
+    "KR": "South Korea", "KOR": "South Korea", "KP": "North Korea", "PRK": "North Korea",
+    "CN": "China", "CHN": "China", "HK": "Hong Kong", "HKG": "Hong Kong", "TW": "Taiwan", "TWN": "Taiwan",
+    "JP": "Japan", "JPN": "Japan", "VN": "Vietnam", "VNM": "Vietnam", "ID": "Indonesia", "IDN": "Indonesia",
+    "TH": "Thailand", "THA": "Thailand", "PH": "Philippines", "PHL": "Philippines", "LA": "Laos", "LAO": "Laos",
+    "KH": "Cambodia", "KHM": "Cambodia", "MM": "Myanmar", "MMR": "Myanmar", "MY": "Malaysia", "MYS": "Malaysia",
+    "SG": "Singapore", "SGP": "Singapore", "IN": "India", "IND": "India", "PK": "Pakistan", "PAK": "Pakistan",
+    "BD": "Bangladesh", "BGD": "Bangladesh", "LK": "Sri Lanka", "LKA": "Sri Lanka", "AU": "Australia", "AUS": "Australia",
+    "NZ": "New Zealand", "NZL": "New Zealand", "AE": "United Arab Emirates", "ARE": "United Arab Emirates", "SA": "Saudi Arabia", "SAU": "Saudi Arabia",
+    "TR": "Türkiye", "TUR": "Türkiye", "IR": "Iran", "IRN": "Iran", "IQ": "Iraq", "IRQ": "Iraq", "QA": "Qatar", "QAT": "Qatar",
+    "KW": "Kuwait", "KWT": "Kuwait", "IL": "Israel", "ISR": "Israel", "JO": "Jordan", "JOR": "Jordan", "EG": "Egypt", "EGY": "Egypt",
+    "ZA": "South Africa", "ZAF": "South Africa", "NG": "Nigeria", "NGA": "Nigeria", "KE": "Kenya", "KEN": "Kenya",
+    "GH": "Ghana", "GHA": "Ghana", "UG": "Uganda", "UGA": "Uganda", "TZ": "Tanzania", "TZA": "Tanzania", "CM": "Cameroon", "CMR": "Cameroon",
+    "DZ": "Algeria", "DZA": "Algeria", "MA": "Morocco", "MAR": "Morocco", "TN": "Tunisia", "TUN": "Tunisia",
+    "SD": "Sudan", "SDN": "Sudan", "SS": "South Sudan", "SSD": "South Sudan", "ET": "Ethiopia", "ETH": "Ethiopia",
+    "GB": "United Kingdom", "GBR": "United Kingdom", "UK": "United Kingdom", "DE": "Germany", "DEU": "Germany", "FR": "France", "FRA": "France",
+    "IT": "Italy", "ITA": "Italy", "ES": "Spain", "ESP": "Spain", "PT": "Portugal", "PRT": "Portugal", "NL": "Netherlands", "NLD": "Netherlands",
+    "BE": "Belgium", "BEL": "Belgium", "LU": "Luxembourg", "LUX": "Luxembourg", "CH": "Switzerland", "CHE": "Switzerland",
+    "AT": "Austria", "AUT": "Austria", "PL": "Poland", "POL": "Poland", "CZ": "Czechia", "CZE": "Czechia", "SK": "Slovakia", "SVK": "Slovakia",
+    "HU": "Hungary", "HUN": "Hungary", "RO": "Romania", "ROU": "Romania", "BG": "Bulgaria", "BGR": "Bulgaria",
+    "GR": "Greece", "GRC": "Greece", "RS": "Serbia", "SRB": "Serbia", "HR": "Croatia", "HRV": "Croatia", "SI": "Slovenia", "SVN": "Slovenia",
+    "UA": "Ukraine", "UKR": "Ukraine", "RU": "Russia", "RUS": "Russia", "BY": "Belarus", "BLR": "Belarus",
+    "US": "United States of America", "USA": "United States of America", "CA": "Canada", "CAN": "Canada", "MX": "Mexico", "MEX": "Mexico",
+    "AR": "Argentina", "ARG": "Argentina", "BR": "Brazil", "BRA": "Brazil", "CL": "Chile", "CHL": "Chile", "CO": "Colombia", "COL": "Colombia",
+    "PE": "Peru", "PER": "Peru", "VE": "Venezuela", "VEN": "Venezuela", "PY": "Paraguay", "PRY": "Paraguay", "UY": "Uruguay", "URY": "Uruguay",
+}
+
 ORIGIN_ALIASES = {
     "대한민국": "South Korea",
     "한국": "South Korea",
@@ -312,13 +340,29 @@ def normalize_origin_name(origin: str) -> str:
     if not raw:
         return ""
 
-    # 우선 별칭 매핑(대소문자/언어 변형)
-    if raw in ORIGIN_ALIASES:
-        return ORIGIN_ALIASES[raw]
+    # 괄호/구분자를 제거하여 ISO 코드, 국호 혼합 입력을 보정
+    cleaned = re.sub(r"[()\[\]]", " ", raw).replace("／", "/")
+    tokens = [t for t in re.split(r"[/,;]|\s+", cleaned) if t]
+    candidate_tokens = [cleaned, raw] + tokens
 
     lower_map = {k.lower(): v for k, v in ORIGIN_ALIASES.items()}
-    if raw.lower() in lower_map:
-        return lower_map[raw.lower()]
+    iso_map = {k.lower(): v for k, v in ISO_COUNTRY_CODES.items()}
+
+    for cand in candidate_tokens:
+        if cand in ORIGIN_ALIASES:
+            return ORIGIN_ALIASES[cand]
+        if cand.lower() in lower_map:
+            return lower_map[cand.lower()]
+        if cand.upper() in ISO_COUNTRY_CODES:
+            return ISO_COUNTRY_CODES[cand.upper()]
+        if cand.lower() in iso_map:
+            return iso_map[cand.lower()]
+        if cand in COUNTRY_CENTROIDS:
+            return cand
+
+    centroid_lower = {k.lower(): k for k in COUNTRY_CENTROIDS.keys()}
+    if raw.lower() in centroid_lower:
+        return centroid_lower[raw.lower()]
 
     return raw
 
@@ -1416,7 +1460,7 @@ with tab4:
 with tab5:
     st.subheader("고위험 원료 선정 · 원산지 지표맵")
 
-    base_candidates = st.session_state.get("filtered_df", df).copy()
+    base_candidates = df.copy()
     if base_candidates.empty:
         st.info("탭① 필터에서 데이터를 만든 뒤 고위험 후보를 선택하세요.")
     else:
@@ -1437,7 +1481,7 @@ with tab5:
             label = f"{row.material_name} ({row.material_code}) / {row.supplier_name} / {row.origin or '원산지 미기재'}"
             option_map[label] = row.material_code
 
-        st.caption("검색과 원산지 필터를 이용해 후보를 줄인 뒤, 다중 선택으로 고위험 리스트를 정의하세요.")
+        st.caption("원료대분류(material_type) 필터와 검색으로 후보를 좁힌 뒤, 다중 선택으로 고위험 리스트를 정의하세요.")
         selected_labels = st.multiselect("고위험 후보(다중 선택)", list(option_map.keys()), key="high_risk_candidates")
         selected_codes = [option_map[lbl] for lbl in selected_labels]
         selected_df = candidate[candidate["material_code"].isin(selected_codes)]
