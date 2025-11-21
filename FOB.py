@@ -42,170 +42,40 @@ DEFAULT_BASELINE_DAYS = 180
 SURGE_Z_THRESHOLD = 3.0  # z >= 3 상승, z <= -3 하락
 
 COUNTRY_CENTROIDS = {
-    # WGS84 국가 중심 좌표 (ISO 공식 국호 기반, 주요 별칭 포함)
-    "Afghanistan": (33.93911, 67.709953),
-    "Albania": (41.153332, 20.168331),
-    "Algeria": (28.033886, 1.659626),
-    "Argentina": (-38.416097, -63.616672),
-    "Armenia": (40.069099, 45.038189),
-    "Australia": (-25.274398, 133.775136),
-    "Austria": (47.516231, 14.550072),
-    "Azerbaijan": (40.143105, 47.576927),
-    "Bangladesh": (23.684994, 90.356331),
-    "Belarus": (53.709807, 27.953389),
-    "Belgium": (50.503887, 4.469936),
-    "Bolivia": (-16.290154, -63.588653),
-    "Bosnia and Herzegovina": (43.915886, 17.679076),
-    "Botswana": (-22.328474, 24.684866),
-    "Brazil": (-14.235004, -51.92528),
-    "Bulgaria": (42.733883, 25.48583),
-    "Cambodia": (12.565679, 104.990963),
-    "Cameroon": (7.369722, 12.354722),
-    "Canada": (56.130366, -106.346771),
-    "Chile": (-35.675147, -71.542969),
-    "China": (35.86166, 104.195397),
-    "Colombia": (4.570868, -74.297333),
-    "Costa Rica": (9.748917, -83.753428),
-    "Côte d'Ivoire": (7.539989, -5.54708),
-    "Croatia": (45.1, 15.2),
-    "Cuba": (21.521757, -77.781167),
-    "Cyprus": (35.126413, 33.429859),
-    "Czechia": (49.817492, 15.472962),
-    "Democratic Republic of the Congo": (-4.038333, 21.758664),
-    "Denmark": (56.26392, 9.501785),
-    "Dominican Republic": (18.735693, -70.162651),
-    "Ecuador": (-1.831239, -78.183406),
-    "Egypt": (26.820553, 30.802498),
-    "El Salvador": (13.794185, -88.89653),
-    "Estonia": (58.595272, 25.013607),
-    "Ethiopia": (9.145, 40.489673),
-    "Finland": (61.92411, 25.748151),
-    "France": (46.227638, 2.213749),
-    "Germany": (51.165691, 10.451526),
-    "Ghana": (7.946527, -1.023194),
-    "Greece": (39.074208, 21.824312),
-    "Guatemala": (15.783471, -90.230759),
-    "Hong Kong": (22.3193039, 114.1693611),
-    "Hungary": (47.162494, 19.503304),
-    "Iceland": (64.963051, -19.020835),
-    "India": (20.593684, 78.96288),
-    "Indonesia": (-0.789275, 113.921327),
-    "Iran": (32.427908, 53.688046),
-    "Iraq": (33.223191, 43.679291),
-    "Ireland": (53.41291, -8.24389),
-    "Israel": (31.046051, 34.851612),
-    "Italy": (41.87194, 12.56738),
-    "Japan": (36.204824, 138.252924),
-    "Jordan": (30.585164, 36.238414),
-    "Kazakhstan": (48.019573, 66.923684),
-    "Kenya": (-0.023559, 37.906193),
-    "Kuwait": (29.31166, 47.481766),
-    "Laos": (19.85627, 102.495496),
-    "Latvia": (56.879635, 24.603189),
-    "Lebanon": (33.854721, 35.862285),
-    "Lithuania": (55.169438, 23.881275),
-    "Luxembourg": (49.815273, 6.129583),
-    "Madagascar": (-18.766947, 46.869107),
-    "Malaysia": (4.210484, 101.975766),
-    "Mexico": (23.634501, -102.552784),
-    "Mongolia": (46.862496, 103.846656),
-    "Morocco": (31.791702, -7.09262),
-    "Myanmar": (21.913965, 95.956223),
-    "Namibia": (-22.95764, 18.49041),
-    "Nepal": (28.394857, 84.124008),
-    "Netherlands": (52.132633, 5.291266),
-    "New Zealand": (-40.900557, 174.885971),
-    "Nigeria": (9.081999, 8.675277),
-    "North Macedonia": (41.608635, 21.745275),
-    "Norway": (60.472024, 8.468946),
-    "Pakistan": (30.375321, 69.345116),
-    "Panama": (8.537981, -80.782127),
-    "Paraguay": (-23.442503, -58.443832),
-    "Peru": (-9.189967, -75.015152),
-    "Philippines": (12.879721, 121.774017),
-    "Poland": (51.919438, 19.145136),
-    "Portugal": (39.399872, -8.224454),
-    "Qatar": (25.354826, 51.183884),
-    "Republic of Korea": (36.5, 127.8),
-    "Romania": (45.943161, 24.96676),
-    "Russia": (61.52401, 105.318756),
-    "Saudi Arabia": (23.885942, 45.079162),
-    "Serbia": (44.016521, 21.005859),
-    "Singapore": (1.352083, 103.819836),
-    "Slovakia": (48.669026, 19.699024),
-    "Slovenia": (46.151241, 14.995463),
-    "South Africa": (-30.559482, 22.937506),
+    "China": (35.0, 103.0),
     "South Korea": (36.5, 127.8),
-    "Spain": (40.463667, -3.74922),
-    "Sri Lanka": (7.873054, 80.771797),
-    "Sweden": (60.128161, 18.643501),
-    "Switzerland": (46.818188, 8.227512),
-    "Taiwan": (23.69781, 120.960515),
-    "Tanzania": (-6.369028, 34.888822),
-    "Thailand": (15.870032, 100.992541),
-    "Tunisia": (33.886917, 9.537499),
-    "Türkiye": (38.963745, 35.243322),
-    "Uganda": (1.373333, 32.290275),
-    "Ukraine": (48.379433, 31.16558),
-    "United Arab Emirates": (23.424076, 53.847818),
-    "United Kingdom": (55.378051, -3.435973),
-    "United States": (37.09024, -95.712891),
-    "United States of America": (37.09024, -95.712891),
-    "Uruguay": (-32.522779, -55.765835),
-    "USA": (37.09024, -95.712891),
-    "Uzbekistan": (41.377491, 64.585262),
-    "Venezuela": (6.42375, -66.58973),
-    "Vietnam": (14.058324, 108.277199),
-    "Zimbabwe": (-19.015438, 29.154857),
-}
-
-# ISO 코드 기반 글로벌 표준 국호 매핑 (alpha-2 / alpha-3 → 영문 공식명)
-ISO_COUNTRY_CODES = {
-    "KR": "South Korea", "KOR": "South Korea", "KP": "North Korea", "PRK": "North Korea",
-    "CN": "China", "CHN": "China", "HK": "Hong Kong", "HKG": "Hong Kong", "TW": "Taiwan", "TWN": "Taiwan",
-    "JP": "Japan", "JPN": "Japan", "VN": "Vietnam", "VNM": "Vietnam", "ID": "Indonesia", "IDN": "Indonesia",
-    "TH": "Thailand", "THA": "Thailand", "PH": "Philippines", "PHL": "Philippines", "LA": "Laos", "LAO": "Laos",
-    "KH": "Cambodia", "KHM": "Cambodia", "MM": "Myanmar", "MMR": "Myanmar", "MY": "Malaysia", "MYS": "Malaysia",
-    "SG": "Singapore", "SGP": "Singapore", "IN": "India", "IND": "India", "PK": "Pakistan", "PAK": "Pakistan",
-    "BD": "Bangladesh", "BGD": "Bangladesh", "LK": "Sri Lanka", "LKA": "Sri Lanka", "AU": "Australia", "AUS": "Australia",
-    "NZ": "New Zealand", "NZL": "New Zealand", "AE": "United Arab Emirates", "ARE": "United Arab Emirates", "SA": "Saudi Arabia", "SAU": "Saudi Arabia",
-    "TR": "Türkiye", "TUR": "Türkiye", "IR": "Iran", "IRN": "Iran", "IQ": "Iraq", "IRQ": "Iraq", "QA": "Qatar", "QAT": "Qatar",
-    "KW": "Kuwait", "KWT": "Kuwait", "IL": "Israel", "ISR": "Israel", "JO": "Jordan", "JOR": "Jordan", "EG": "Egypt", "EGY": "Egypt",
-    "ZA": "South Africa", "ZAF": "South Africa", "NG": "Nigeria", "NGA": "Nigeria", "KE": "Kenya", "KEN": "Kenya",
-    "GH": "Ghana", "GHA": "Ghana", "UG": "Uganda", "UGA": "Uganda", "TZ": "Tanzania", "TZA": "Tanzania", "CM": "Cameroon", "CMR": "Cameroon",
-    "DZ": "Algeria", "DZA": "Algeria", "MA": "Morocco", "MAR": "Morocco", "TN": "Tunisia", "TUN": "Tunisia",
-    "SD": "Sudan", "SDN": "Sudan", "SS": "South Sudan", "SSD": "South Sudan", "ET": "Ethiopia", "ETH": "Ethiopia",
-    "GB": "United Kingdom", "GBR": "United Kingdom", "UK": "United Kingdom", "DE": "Germany", "DEU": "Germany", "FR": "France", "FRA": "France",
-    "IT": "Italy", "ITA": "Italy", "ES": "Spain", "ESP": "Spain", "PT": "Portugal", "PRT": "Portugal", "NL": "Netherlands", "NLD": "Netherlands",
-    "BE": "Belgium", "BEL": "Belgium", "LU": "Luxembourg", "LUX": "Luxembourg", "CH": "Switzerland", "CHE": "Switzerland",
-    "AT": "Austria", "AUT": "Austria", "PL": "Poland", "POL": "Poland", "CZ": "Czechia", "CZE": "Czechia", "SK": "Slovakia", "SVK": "Slovakia",
-    "HU": "Hungary", "HUN": "Hungary", "RO": "Romania", "ROU": "Romania", "BG": "Bulgaria", "BGR": "Bulgaria",
-    "GR": "Greece", "GRC": "Greece", "RS": "Serbia", "SRB": "Serbia", "HR": "Croatia", "HRV": "Croatia", "SI": "Slovenia", "SVN": "Slovenia",
-    "UA": "Ukraine", "UKR": "Ukraine", "RU": "Russia", "RUS": "Russia", "BY": "Belarus", "BLR": "Belarus",
-    "US": "United States of America", "USA": "United States of America", "CA": "Canada", "CAN": "Canada", "MX": "Mexico", "MEX": "Mexico",
-    "AR": "Argentina", "ARG": "Argentina", "BR": "Brazil", "BRA": "Brazil", "CL": "Chile", "CHL": "Chile", "CO": "Colombia", "COL": "Colombia",
-    "PE": "Peru", "PER": "Peru", "VE": "Venezuela", "VEN": "Venezuela", "PY": "Paraguay", "PRY": "Paraguay", "UY": "Uruguay", "URY": "Uruguay",
-}
-
-ORIGIN_ALIASES = {
-    "대한민국": "South Korea",
-    "한국": "South Korea",
-    "Korea": "South Korea",
-    "미국": "United States",
-    "中國": "China",
-    "중국": "China",
-    "일본": "Japan",
-    "베트남": "Vietnam",
-    "인도네시아": "Indonesia",
-    "대만": "Taiwan",
-    "홍콩": "Hong Kong",
-    "영국": "United Kingdom",
-    "독일": "Germany",
-    "프랑스": "France",
-    "이탈리아": "Italy",
-    "멕시코": "Mexico",
-    "브라질": "Brazil",
-    "터키": "Türkiye",
+    "Republic of Korea": (36.5, 127.8),
+    "Korea": (36.5, 127.8),
+    "United States": (39.5, -98.35),
+    "USA": (39.5, -98.35),
+    "United States of America": (39.5, -98.35),
+    "Japan": (36.2, 138.3),
+    "Vietnam": (14.0, 108.0),
+    "Thailand": (15.8, 101.0),
+    "Indonesia": (-2.5, 118.0),
+    "India": (22.0, 79.0),
+    "Canada": (56.0, -106.0),
+    "Brazil": (-10.0, -55.0),
+    "Mexico": (23.5, -102.0),
+    "Germany": (51.0, 10.0),
+    "France": (46.2, 2.2),
+    "United Kingdom": (55.0, -2.0),
+    "U.K.": (55.0, -2.0),
+    "UK": (55.0, -2.0),
+    "Spain": (40.0, -4.0),
+    "Italy": (42.5, 12.5),
+    "Australia": (-25.0, 133.0),
+    "New Zealand": (-41.0, 174.0),
+    "Russia": (60.0, 90.0),
+    "Türkiye": (39.0, 35.0),
+    "Turkey": (39.0, 35.0),
+    "Philippines": (12.5, 122.5),
+    "Malaysia": (4.5, 102.0),
+    "Taiwan": (23.7, 121.0),
+    "Hong Kong": (22.3, 114.2),
+    "Singapore": (1.35, 103.8),
+    "Argentina": (-34.0, -64.0),
+    "Chile": (-30.0, -71.0),
 }
 
 st.title(APP_TITLE)
@@ -882,46 +752,74 @@ with tab2:
         mask_recent   = (df["dt"] >= recent_start) & (df["dt"] <= TODAY)
         mask_baseline = (df["dt"] >= baseline_start) & (df["dt"] <= baseline_end)
 
-        # 일일 합산 (동일 7키 + dt 기준으로 분자/분모 합)
+        # 일일 합산 (동일 7키 + dt 기준으로 분자/유일 분모 합)
         grp_cols = KEY7 + ["dt"]
+        key6 = ["plant","line","material_type","material_code","supplier_code"]
 
-        recent_daily = (
-            df.loc[mask_recent, grp_cols + ["count","selection_amount_kg"]]
-              .groupby(grp_cols, as_index=False)[["count","selection_amount_kg"]].sum()
+        den_source_col = (
+            "selection_amount_kg_unique"
+            if "selection_amount_kg_unique" in df.columns
+            else "selection_amount_kg"
         )
-        base_daily = (
-            df.loc[mask_baseline, grp_cols + ["count","selection_amount_kg"]]
-              .groupby(grp_cols, as_index=False)[["count","selection_amount_kg"]].sum()
-        )
+        df["_selection_amount_unique"] = pd.to_numeric(
+            df.get(den_source_col, 0), errors="coerce"
+        ).fillna(0.0)
+
+        def build_daily(mask):
+            counts = (
+                df.loc[mask, grp_cols + ["count"]]
+                  .groupby(grp_cols, as_index=False)["count"].sum()
+            )
+
+            lot_den = (
+                df.loc[mask, key6 + ["lot_no","dt","_selection_amount_unique"]]
+                  .groupby(key6 + ["lot_no","dt"], as_index=False)["_selection_amount_unique"].sum()
+            )
+            day_den = (
+                lot_den.groupby(key6 + ["dt"], as_index=False)["_selection_amount_unique"].sum()
+                       .rename(columns={"_selection_amount_unique": "selection_amount_kg_unique"})
+            )
+
+            return counts.merge(day_den, on=key6 + ["dt"], how="left").fillna({"selection_amount_kg_unique": 0.0})
+
+        recent_daily = build_daily(mask_recent)
+        base_daily = build_daily(mask_baseline)
 
         # 최근/기준 기간 합계 (키=7개)
         key7_only = KEY7.copy()
         recent_sum = (
             recent_daily.groupby(key7_only, as_index=False)
-                        .agg(x_cnt=("count","sum"), x_den=("selection_amount_kg","sum"))
+                        .agg(x_cnt=("count","sum"), x_den_unique=("selection_amount_kg_unique","sum"))
         )
         base_sum = (
             base_daily.groupby(key7_only, as_index=False)
-                      .agg(b_cnt=("count","sum"), b_den=("selection_amount_kg","sum"))
+                      .agg(b_cnt=("count","sum"), b_den_unique=("selection_amount_kg_unique","sum"))
         )
 
         # 결합
         merged = recent_sum.merge(base_sum, on=key7_only, how="outer").fillna(0)
 
-        # rate 계산
-        merged["x_rate"] = np.where(merged["x_den"] > 0, merged["x_cnt"] / merged["x_den"], 0.0)
-        merged["b_rate"] = np.where(merged["b_den"] > 0, merged["b_cnt"] / merged["b_den"], 0.0)
+        # rate 계산 (유일 노출량 기준)
+        merged["x_rate"] = np.where(
+            merged["x_den_unique"] > 0, merged["x_cnt"] / merged["x_den_unique"], 0.0
+        )
+        merged["b_rate"] = np.where(
+            merged["b_den_unique"] > 0, merged["b_cnt"] / merged["b_den_unique"], 0.0
+        )
 
         # 기대값 E = baseline_rate * recent_den
-        merged["x_exp"] = merged["b_rate"] * merged["x_den"]
+        merged["x_exp"] = merged["b_rate"] * merged["x_den_unique"]
 
         # z-score (포아송 근사)
         merged["z"] = np.where(merged["x_exp"] > 0,
                                (merged["x_cnt"] - merged["x_exp"]) / np.sqrt(merged["x_exp"] + EPS),
                                0.0)
 
-        merged["expected_recent_rate"] = np.where(merged["x_den"] > 0,
-                                                  merged["x_exp"] / merged["x_den"], 0.0)
+        merged["expected_recent_rate"] = np.where(
+            merged["x_den_unique"] > 0,
+            merged["x_exp"] / merged["x_den_unique"],
+            0.0,
+        )
 
         merged["flag"] = np.select(
             [merged["z"] >= SURGE_Z, merged["z"] <= -SURGE_Z],
@@ -929,7 +827,11 @@ with tab2:
         )
 
         # 표시 순서/컬럼 정리
-        cols = key7_only + ["x_cnt","x_den","x_rate","b_cnt","b_den","b_rate","expected_recent_rate","z","flag"]
+        cols = key7_only + [
+            "x_cnt","x_den_unique","x_rate",
+            "b_cnt","b_den_unique","b_rate",
+            "expected_recent_rate","z","flag",
+        ]
         return merged[cols].sort_values("z", ascending=False)
 
     with st.expander(f"급증/하락 탐지 (최근 {RECENT_DAYS}일 vs 과거 {BASE_DAYS}일, z≥±{SURGE_Z})", expanded=True):
@@ -938,9 +840,10 @@ with tab2:
         if surge_df is not None and not surge_df.empty:
             st.write(f"분석 대상 조합 수: **{len(surge_df):,}**")
             st.dataframe(
-                surge_df[KEY7 + ["x_cnt","x_den","x_rate","b_cnt","b_den","b_rate","expected_recent_rate","z","flag"]].head(200),
+                surge_df[KEY7 + ["x_cnt","x_den_unique","x_rate","b_cnt","b_den_unique","b_rate","expected_recent_rate","z","flag"]].head(200),
                 use_container_width=True
             )
+            st.caption("노출량(x/b_den_unique)은 LOT·원료 단위로 중복 제거된 selection_amount_kg_unique 합계이며, 기존 selection_amount_kg 기반 집계와 다를 수 있습니다.")
             s1, s2, s3 = st.columns(3)
             with s1: st.metric("상승 경보", int((surge_df["flag"]=="상승").sum()))
             with s2: st.metric("하락 감지", int((surge_df["flag"]=="하락").sum()))
@@ -982,19 +885,32 @@ with tab2:
             (fdf["supplier_code"] == srow["supplier_code"]) &
             (fdf["contam_type"] == srow["contam_type"])
         )
-        ts = fdf.loc[mask, ["dt", "count", "selection_amount_kg"]].copy()
+        ts = fdf.loc[mask, ["dt", "count", "selection_amount_kg", "selection_amount_kg_unique", "lot_no", "plant", "line", "material_type", "material_code", "supplier_code"]].copy()
+
+        ts["_detail_den"] = pd.to_numeric(
+            ts["selection_amount_kg_unique"] if "selection_amount_kg_unique" in ts else ts.get("selection_amount_kg", 0),
+            errors="coerce",
+        ).fillna(0.0)
 
         calendar = pd.DataFrame({"dt": [base_start + timedelta(days=i) for i in range(BASE_DAYS)]})
-        daily = (
-            ts.groupby("dt", as_index=False)[["count", "selection_amount_kg"]].sum()
-              .merge(calendar, on="dt", how="right")
-              .fillna({"count": 0, "selection_amount_kg": 0})
-              .sort_values("dt")
+
+        count_daily = ts.groupby("dt", as_index=False)["count"].sum()
+        den_lot = (
+            ts.groupby(["plant","line","material_type","material_code","supplier_code","lot_no","dt"], as_index=False)["_detail_den"].sum()
         )
-        daily["has_selection"] = daily["selection_amount_kg"] > 0
+        den_daily = den_lot.groupby("dt", as_index=False)["_detail_den"].sum()
+
+        daily = (
+            count_daily.merge(den_daily, on="dt", how="outer")
+                       .merge(calendar, on="dt", how="right")
+                       .fillna({"count": 0, "_detail_den": 0.0})
+                       .sort_values("dt")
+        )
+        daily = daily.rename(columns={"_detail_den": "selection_amount_kg_unique"})
+        daily["has_selection"] = daily["selection_amount_kg_unique"] > 0
         daily["daily_rate"] = np.where(
-            daily["selection_amount_kg"] > 0,
-            daily["count"] / daily["selection_amount_kg"],
+            daily["selection_amount_kg_unique"] > 0,
+            daily["count"] / daily["selection_amount_kg_unique"],
             0.0,
         )
 
@@ -1020,7 +936,7 @@ with tab2:
             y=alt.Y("daily_rate:Q", title="일일 이물수준 (count/kg)", axis=alt.Axis(format=".4f")),
             color=alt.value("#1E88E5"),
             shape=alt.value("circle"),
-            tooltip=["dt:T", "count:Q", "selection_amount_kg:Q", "daily_rate:Q"],
+            tooltip=["dt:T", "count:Q", "selection_amount_kg_unique:Q", "daily_rate:Q"],
         )
 
         points_nosel = alt.Chart(daily[~daily["has_selection"]]).mark_square(size=45, opacity=0.45).encode(
@@ -1028,7 +944,7 @@ with tab2:
             y=alt.Y("daily_rate:Q"),
             color=alt.value("#9E9E9E"),
             shape=alt.value("square"),
-            tooltip=["dt:T", alt.Tooltip("selection_amount_kg:Q", title="selection_kg")],
+            tooltip=["dt:T", alt.Tooltip("selection_amount_kg_unique:Q", title="selection_kg_unique")],
         )
 
         lines = alt.Chart(lines_df).mark_line(size=2).encode(
@@ -1055,7 +971,6 @@ with tab2:
                   .agg(count=("count", "sum"), kg=("selection_amount_kg", "sum"))
                   .sort_values("dt")
         )
-        sup_daily = sup_daily[sup_daily["kg"] > 0]
 
         if len(sup_daily) < 20:
             st.info(
@@ -1064,66 +979,246 @@ with tab2:
                 f"선별일 수가 {len(sup_daily)}일입니다. (≥ 20일 필요)"
             )
         else:
-            ubar = sup_daily["count"].sum() / sup_daily["kg"].sum()
-            sup_daily["u"] = sup_daily["count"] / sup_daily["kg"]
-            sup_daily["ucl"] = ubar + 3.0 * np.sqrt(np.maximum(ubar, 0) / sup_daily["kg"])
-            sup_daily["lcl"] = np.maximum(0.0, ubar - 3.0 * np.sqrt(np.maximum(ubar, 0) / sup_daily["kg"]))
-            sup_daily["z"] = np.where(ubar > 0, (sup_daily["u"] - ubar) / np.sqrt(ubar / sup_daily["kg"]), 0.0)
+            def _recommend_chart_type(df_daily: pd.DataFrame) -> tuple[str, str]:
+                exposure_ratio = (df_daily["kg"] > 0).mean()
+                has_exposure = exposure_ratio >= 0.6
+                reason_parts = []
+                if has_exposure:
+                    kg_pos = df_daily[df_daily["kg"] > 0]["kg"]
+                    cv_kg = kg_pos.std() / kg_pos.mean() if not kg_pos.empty and kg_pos.mean() > 0 else 0
+                    avg_rate = df_daily["count"].sum() / max(df_daily["kg"].sum(), 1e-9)
+                    if cv_kg > 0.3:
+                        reason_parts.append("일일 노출량 변동이 큰 편")
+                        return "u", " / ".join(reason_parts + ["가변 표본 → u-chart 추천"])
+                    if avg_rate < 0.05:
+                        reason_parts.append("결함률이 낮고 표본이 비교적 일정")
+                        return "p", " / ".join(reason_parts + ["이상비율 관리(p-chart)"])
+                    reason_parts.append("노출량이 존재하며 가변성 낮음")
+                    return "u", " / ".join(reason_parts + ["결점률 관리(u-chart)"])
+                avg_cnt = df_daily["count"].mean()
+                if avg_cnt <= 3:
+                    return "np", "노출량이 없어 건수 자체를 추적(np-chart)"
+                return "c", "노출량이 없어 결점 건수 자체 관리(c-chart)"
 
-            u_line = alt.Chart(sup_daily).mark_line(color="#3949AB").encode(
-                x="dt:T", y=alt.Y("u:Q", title="결점률 u (count/kg)", axis=alt.Axis(format=".4f"))
+            def _build_chart_df(df_daily: pd.DataFrame, chart_type: str) -> pd.DataFrame:
+                work = df_daily.copy()
+                eps = 1e-9
+                if chart_type == "u":
+                    work["metric"] = np.where(work["kg"] > 0, work["count"] / work["kg"], np.nan)
+                    center = work["count"].sum() / max(work["kg"].sum(), eps)
+                    work["sigma"] = np.where(work["kg"] > 0, np.sqrt(np.maximum(center, 0) / work["kg"]), np.nan)
+                    work["cl"] = center
+                    work["ucl"] = center + 3 * work["sigma"]
+                    work["lcl"] = np.maximum(0.0, center - 3 * work["sigma"])
+                    work["chart_label"] = "u-chart (count/kg)"
+                elif chart_type == "p":
+                    work["sample"] = work["kg"].replace(0, np.nan)
+                    center = work["count"].sum() / max(work["sample"].sum(), eps)
+                    work["metric"] = np.where(work["sample"] > 0, work["count"] / work["sample"], np.nan)
+                    work["sigma"] = np.where(
+                        work["sample"] > 0,
+                        np.sqrt(np.maximum(center * (1 - center), 0) / work["sample"]),
+                        np.nan,
+                    )
+                    work["cl"] = center
+                    work["ucl"] = center + 3 * work["sigma"]
+                    work["lcl"] = np.maximum(0.0, center - 3 * work["sigma"])
+                    work["chart_label"] = "p-chart (불량비율)"
+                elif chart_type == "np":
+                    n_est = work["kg"].replace(0, np.nan).mean()
+                    n_est = n_est if pd.notna(n_est) and n_est > 0 else max(work["count"].mean(), 1)
+                    center_rate = work["count"].sum() / (n_est * max(len(work), 1))
+                    work["metric"] = work["count"]
+                    work["sigma"] = np.sqrt(np.maximum(center_rate * (1 - center_rate), 0)) * n_est
+                    work["cl"] = center_rate * n_est
+                    work["ucl"] = work["cl"] + 3 * work["sigma"]
+                    work["lcl"] = np.maximum(0.0, work["cl"] - 3 * work["sigma"])
+                    work["chart_label"] = "np-chart (불량개수)"
+                elif chart_type == "I-MR":
+                    work["metric"] = np.where(work["kg"] > 0, work["count"] / work["kg"], work["count"])
+                    center = work["metric"].mean()
+                    mr = work["metric"].diff().abs()
+                    mr_bar = mr[1:].mean()
+                    d2 = 1.128
+                    sigma = mr_bar / d2 if d2 > 0 else 0
+                    work["sigma"] = sigma
+                    work["cl"] = center
+                    work["ucl"] = center + 3 * sigma
+                    work["lcl"] = center - 3 * sigma
+                    work["chart_label"] = "I-MR (개별값)"
+                else:  # c-chart
+                    work["metric"] = work["count"]
+                    center = work["metric"].mean()
+                    sigma = np.sqrt(np.maximum(center, 0))
+                    work["sigma"] = sigma
+                    work["cl"] = center
+                    work["ucl"] = center + 3 * sigma
+                    work["lcl"] = np.maximum(0.0, center - 3 * sigma)
+                    work["chart_label"] = "c-chart (결점건수)"
+                work["sigma"] = work["sigma"].replace(0, np.nan)
+                work["z"] = (work["metric"] - work["cl"]) / work["sigma"]
+                return work
+
+            def _detect_rules(chart_df: pd.DataFrame, selected_rules: list[str]) -> tuple[pd.DataFrame, list[dict]]:
+                z = chart_df["z"].fillna(0)
+                labels = [[] for _ in range(len(chart_df))]
+                violations = []
+
+                def _mark(idx_list, rule_name, description):
+                    for i in idx_list:
+                        labels[i].append(rule_name)
+                    for i in idx_list:
+                        violations.append({
+                            "dt": chart_df.iloc[i]["dt"],
+                            "rule": rule_name,
+                            "설명": description,
+                            "값": chart_df.iloc[i]["metric"],
+                        })
+
+                if "3시그마" in selected_rules:
+                    breach = chart_df.index[(z > 3) | (z < -3)].tolist()
+                    _mark(breach, "3시그마", "관리한계(UCL/LCL) 초과")
+
+                if "8점 한쪽" in selected_rules:
+                    side = np.sign(z.replace(0, np.nan)).fillna(0)
+                    run = 0
+                    last = 0
+                    run_idx = []
+                    for i, sgn in enumerate(side):
+                        if sgn != 0 and sgn == last:
+                            run += 1
+                        else:
+                            run = 1 if sgn != 0 else 0
+                        last = sgn
+                        run_idx.append(run)
+                    breach = [i for i, r in enumerate(run_idx) if r >= 8]
+                    _mark(breach, "8점 한쪽", "연속 8점이 중앙선 한쪽")
+
+                if "추세 6점" in selected_rules:
+                    inc = dec = 0
+                    trend_idx = []
+                    for i in range(len(chart_df)):
+                        if i == 0:
+                            inc = dec = 1
+                        else:
+                            inc = inc + 1 if chart_df.iloc[i]["metric"] > chart_df.iloc[i-1]["metric"] else 1
+                            dec = dec + 1 if chart_df.iloc[i]["metric"] < chart_df.iloc[i-1]["metric"] else 1
+                        trend_idx.append(max(inc, dec))
+                    breach = [i for i, r in enumerate(trend_idx) if r >= 6]
+                    _mark(breach, "추세 6점", "연속 6점 상승/하락")
+
+                if "2/3점 2시그마 밖" in selected_rules:
+                    sigma2 = (z >= 2) | (z <= -2)
+                    for i in range(len(chart_df) - 2):
+                        window = sigma2.iloc[i:i+3]
+                        if window.sum() >= 2:
+                            _mark(range(i, i+3), "2/3점 2시그마 밖", "최근 3점 중 2점이 ±2σ 밖")
+
+                if "4/5점 1시그마 밖" in selected_rules:
+                    sigma1 = (z >= 1) | (z <= -1)
+                    for i in range(len(chart_df) - 4):
+                        window = sigma1.iloc[i:i+5]
+                        if window.sum() >= 4:
+                            _mark(range(i, i+5), "4/5점 1시그마 밖", "최근 5점 중 4점이 ±1σ 밖")
+
+                label_series = ["; ".join(sorted(set(l))) if l else "정상" for l in labels]
+                chart_df = chart_df.copy()
+                chart_df["violation"] = label_series
+                return chart_df, violations
+
+            rec_chart, rec_reason = _recommend_chart_type(sup_daily)
+            chart_options = ["자동 추천", "u", "c", "p", "np", "I-MR"]
+            chart_labels = {
+                "u": "u-chart", "c": "c-chart", "p": "p-chart", "np": "np-chart", "I-MR": "I-MR"
+            }
+            default_idx = chart_options.index(rec_chart) if rec_chart in chart_options else 0
+            sel_chart = st.radio(
+                "관리도 유형 선택 (자동 추천 포함)",
+                chart_options,
+                index=default_idx,
+                format_func=lambda x: "자동 추천(" + chart_labels.get(rec_chart, "u-chart") + ")" if x == "자동 추천" else chart_labels.get(x, x)
             )
-            cl_rule = alt.Chart(sup_daily).mark_rule(color="#00897B", strokeDash=[6, 4]).encode(
-                x="dt:T", y="mean(u):Q"
-            )
-            ucl_line = alt.Chart(sup_daily).mark_line(color="#E53935", strokeDash=[4, 3]).encode(
-                x="dt:T", y="ucl:Q"
-            )
-            lcl_line = alt.Chart(sup_daily).mark_line(color="#E53935", strokeDash=[4, 3]).encode(
-                x="dt:T", y="lcl:Q"
-            )
-            pts_spc = alt.Chart(sup_daily).mark_circle(size=50).encode(
-                x="dt:T", y="u:Q",
-                color=alt.condition(
-                    "datum.u > datum.ucl || datum.u < datum.lcl",
-                    alt.value("#E53935"),
-                    alt.value("#43A047"),
-                ),
-                tooltip=["dt:T", "count:Q", "kg:Q", "u:Q", "ucl:Q", "lcl:Q", "z:Q"],
+            chosen_chart = rec_chart if sel_chart == "자동 추천" else sel_chart
+            st.caption(f"추천 사유: {rec_reason}")
+
+            rule_choices = ["3시그마", "8점 한쪽", "추세 6점", "2/3점 2시그마 밖", "4/5점 1시그마 밖"]
+            selected_rules = st.multiselect(
+                "Western/Nelson 규칙 적용", rule_choices, default=["3시그마", "8점 한쪽", "2/3점 2시그마 밖"]
             )
 
-            st.altair_chart((ucl_line + lcl_line + cl_rule + u_line + pts_spc).properties(height=300),
-                            use_container_width=True)
-
-            n = len(sup_daily)
-            out_hi = int((sup_daily["u"] > sup_daily["ucl"]).sum())
-            out_lo = int((sup_daily["u"] < sup_daily["lcl"]).sum())
-            out_rate = (out_hi + out_lo) / n
-            z_abs_max = float(np.abs(sup_daily["z"]).max())
-
-            var_obs = float(np.var(sup_daily["count"] - sup_daily["kg"] * ubar, ddof=1))
-            var_exp = float(np.mean(sup_daily["kg"] * ubar))
-            overdisp = var_obs > 1.5 * var_exp
-
-            verdict = []
-            if out_rate >= 0.05 or z_abs_max >= 3.5:
-                verdict.append("**관리불량(경보 수준)**: 관리한계 위반율이 높거나 극단치가 큼.")
-            elif out_rate >= 0.02 or z_abs_max >= 3.0:
-                verdict.append("**주의 필요**: 변동성이 커지고 있음.")
+            chart_df = _build_chart_df(sup_daily, chosen_chart)
+            if chart_df["metric"].isna().all():
+                st.warning("선택한 관리도에 필요한 노출량/표본 정보가 부족합니다.")
             else:
-                verdict.append("**관리양호**: 통계적으로 안정적인 수준.")
-            if overdisp:
-                verdict.append("**과산포 의심**: 단순 포아송 가정보다 산포가 큽니다.")
+                chart_df, violation_rows = _detect_rules(chart_df, selected_rules)
 
-            actions = [
-                "- **자석·체·금속검출기** 점검 주기 단축 및 감도 재검증",
-                "- **LOT별 이물 이력** 사전심사(입고검사 강화), 고위험 LOT 선별 우선",
-                "- **설비 청결/세척 SOP** 강화, 교대/작업자 편차 모니터링",
-                "- **선별량/속도 최적화**로 과부하 구간 제거",
-            ]
-            st.markdown("**통계 평가:** " + " ".join(verdict))
-            st.markdown("**개선 제안:**")
-            st.markdown("\n".join([f"  {a}" for a in actions]))
+                base_line = alt.Chart(chart_df).mark_rule(color="#00897B", strokeDash=[6, 4]).encode(
+                    x="dt:T", y=alt.datum(float(chart_df["cl"].iloc[0]))
+                )
+                limit_band = alt.Chart(chart_df).mark_area(opacity=0.08, color="#FFCDD2").encode(
+                    x="dt:T", y="lcl:Q", y2="ucl:Q"
+                )
+                line = alt.Chart(chart_df).mark_line(color="#3949AB").encode(
+                    x="dt:T", y=alt.Y("metric:Q", title=chart_df["chart_label"].iloc[0], axis=alt.Axis(format=".4f"))
+                )
+                ucl_line = alt.Chart(chart_df).mark_line(color="#E53935", strokeDash=[4, 3]).encode(
+                    x="dt:T", y="ucl:Q"
+                )
+                lcl_line = alt.Chart(chart_df).mark_line(color="#E53935", strokeDash=[4, 3]).encode(
+                    x="dt:T", y="lcl:Q"
+                )
+                pts = alt.Chart(chart_df).mark_circle(size=55).encode(
+                    x="dt:T", y="metric:Q",
+                    color=alt.condition(
+                        alt.datum.violation != "정상",
+                        alt.value("#E53935"),
+                        alt.value("#43A047"),
+                    ),
+                    tooltip=[
+                        "dt:T", "count:Q", "kg:Q", "metric:Q", "ucl:Q", "lcl:Q", "violation:N"
+                    ],
+                )
+
+                st.markdown(
+                    f"**{chart_df['chart_label'].iloc[0]} | 규칙:** {', '.join(selected_rules)}"
+                )
+                st.altair_chart((limit_band + base_line + ucl_line + lcl_line + line + pts).properties(height=320),
+                                use_container_width=True)
+
+                if violation_rows:
+                    viol_df = pd.DataFrame(violation_rows)
+                    st.markdown("**규칙 위반 내역**")
+                    st.dataframe(viol_df, use_container_width=True)
+                else:
+                    st.info("선택한 규칙 위반이 없습니다.")
+
+                n = len(chart_df)
+                out_rate = (chart_df["violation"] != "정상").mean()
+                z_abs_max = float(np.abs(chart_df["z"].fillna(0)).max())
+
+                var_obs = float(np.var(chart_df["count"] - chart_df["kg"] * chart_df["metric"].fillna(0), ddof=1)) if "kg" in chart_df else 0.0
+                var_exp = float(np.mean(chart_df.get("kg", pd.Series([0])) * chart_df["metric"].fillna(0)))
+                overdisp = var_obs > 1.5 * var_exp and var_exp > 0
+
+                verdict = []
+                if out_rate >= 0.05 or z_abs_max >= 3.5:
+                    verdict.append("**관리불량(경보 수준)**: 규칙 위반율이 높거나 극단치가 큽니다.")
+                elif out_rate >= 0.02 or z_abs_max >= 3.0:
+                    verdict.append("**주의 필요**: 변동성이 커지고 있음.")
+                else:
+                    verdict.append("**관리양호**: 통계적으로 안정적인 수준.")
+                if overdisp:
+                    verdict.append("**과산포 의심**: 단순 포아송 가정보다 산포가 큽니다.")
+
+                actions = [
+                    "- **자석·체·금속검출기** 점검 주기 단축 및 감도 재검증",
+                    "- **LOT별 이물 이력** 사전심사(입고검사 강화), 고위험 LOT 선별 우선",
+                    "- **설비 청결/세척 SOP** 강화, 교대/작업자 편차 모니터링",
+                    "- **선별량/속도 최적화**로 과부하 구간 제거",
+                ]
+                st.markdown("**선택 규칙/해석:** " + ", ".join(selected_rules) + " → " + " ".join(verdict))
+                st.markdown("**개선 제안:**")
+                st.markdown("\n".join([f"  {a}" for a in actions]))
 
         st.markdown("#### 🔎 최근 2일 치명적 이물 원료 추적 & 교차공장 사용 이력")
 
@@ -1460,16 +1555,23 @@ with tab4:
 with tab5:
     st.subheader("고위험 원료 선정 · 원산지 지표맵")
 
-    base_candidates = df.copy()
+    base_candidates = st.session_state.get("filtered_df", df).copy()
     if base_candidates.empty:
         st.info("탭① 필터에서 데이터를 만든 뒤 고위험 후보를 선택하세요.")
     else:
-        type_pool = sorted([t for t in base_candidates["material_type"].unique() if str(t).strip()])
-        type_filter = st.multiselect("원료대분류(material_type) 필터", type_pool, key="high_risk_material_type")
+        search_kw = st.text_input("검색(원료명/코드/공급사)", key="high_risk_search")
+        origin_pool = sorted([o for o in base_candidates["origin"].unique() if str(o).strip()])
+        origin_filter = st.multiselect("원산지 필터", origin_pool, key="high_risk_origin")
 
         candidate = base_candidates.copy()
-        if type_filter:
-            candidate = candidate[candidate["material_type"].isin(type_filter)]
+        if search_kw:
+            pattern = search_kw.strip()
+            mask = candidate[["material_name", "material_code", "supplier_name"]].apply(
+                lambda s: s.str.contains(pattern, case=False, na=False)
+            ).any(axis=1)
+            candidate = candidate[mask]
+        if origin_filter:
+            candidate = candidate[candidate["origin"].isin(origin_filter)]
 
         option_map = {}
         for _, row in (
@@ -1481,7 +1583,7 @@ with tab5:
             label = f"{row.material_name} ({row.material_code}) / {row.supplier_name} / {row.origin or '원산지 미기재'}"
             option_map[label] = row.material_code
 
-        st.caption("원료대분류(material_type) 필터와 검색으로 후보를 좁힌 뒤, 다중 선택으로 고위험 리스트를 정의하세요.")
+        st.caption("검색과 원산지 필터를 이용해 후보를 줄인 뒤, 다중 선택으로 고위험 리스트를 정의하세요.")
         selected_labels = st.multiselect("고위험 후보(다중 선택)", list(option_map.keys()), key="high_risk_candidates")
         selected_codes = [option_map[lbl] for lbl in selected_labels]
         selected_df = candidate[candidate["material_code"].isin(selected_codes)]
@@ -1558,18 +1660,12 @@ with tab5:
                 .reset_index()
             )
             origin_metrics["origin"].fillna("(미기재)", inplace=True)
-            origin_metrics["origin_std"] = origin_metrics["origin"].apply(normalize_origin_name)
-            origin_metrics["origin_std"].replace("", "(미기재)", inplace=True)
-            origin_metrics["origin_for_plot"] = origin_metrics["origin_std"]
             origin_metrics["rate_per_kg"] = np.where(
                 origin_metrics["kg_sum"] > 0,
                 origin_metrics["count_sum"] / origin_metrics["kg_sum"],
                 0.0,
             )
-            st.dataframe(
-                origin_metrics[["origin", "origin_std", "count_sum", "kg_sum", "rate_per_kg"]],
-                use_container_width=True,
-            )
+            st.dataframe(origin_metrics, use_container_width=True)
 
             max_rate = float(origin_metrics["rate_per_kg"].max()) if not origin_metrics.empty else 0.0
             max_rate = max(max_rate, 1e-6)
@@ -1579,9 +1675,7 @@ with tab5:
                 .mark_geoshape(stroke="#f5f5f5", strokeWidth=0.5)
                 .transform_lookup(
                     lookup="properties.name",
-                    from_=alt.LookupData(
-                        origin_metrics, "origin_for_plot", ["rate_per_kg", "count_sum", "kg_sum", "origin", "origin_for_plot"]
-                    ),
+                    from_=alt.LookupData(origin_metrics, "origin", ["rate_per_kg", "count_sum", "kg_sum", "origin"]),
                 )
                 .encode(
                     color=alt.Color(
@@ -1597,7 +1691,11 @@ with tab5:
             st.altair_chart(map_chart, use_container_width=True)
 
             geo_ready = origin_metrics.copy()
-            geo_ready[["lat", "lon"]] = geo_ready["origin_for_plot"].map(COUNTRY_CENTROIDS).apply(pd.Series)
+            geo_ready[["lat", "lon"]] = geo_ready["origin"].apply(
+                lambda origin: pd.Series(
+                    COUNTRY_CENTROIDS.get(origin, (np.nan, np.nan)), index=["lat", "lon"]
+                )
+            )
             geo_ready = geo_ready.dropna(subset=["lat", "lon"])
             if not geo_ready.empty:
                 geo_ready["rate_scaled"] = geo_ready["rate_per_kg"] * 1e6
