@@ -859,7 +859,6 @@ with tab2:
                   .agg(count=("count", "sum"), kg=("selection_amount_kg", "sum"))
                   .sort_values("dt")
         )
-        sup_daily = sup_daily[sup_daily["kg"] > 0]
 
         if len(sup_daily) < 20:
             st.info(
@@ -868,66 +867,246 @@ with tab2:
                 f"선별일 수가 {len(sup_daily)}일입니다. (≥ 20일 필요)"
             )
         else:
-            ubar = sup_daily["count"].sum() / sup_daily["kg"].sum()
-            sup_daily["u"] = sup_daily["count"] / sup_daily["kg"]
-            sup_daily["ucl"] = ubar + 3.0 * np.sqrt(np.maximum(ubar, 0) / sup_daily["kg"])
-            sup_daily["lcl"] = np.maximum(0.0, ubar - 3.0 * np.sqrt(np.maximum(ubar, 0) / sup_daily["kg"]))
-            sup_daily["z"] = np.where(ubar > 0, (sup_daily["u"] - ubar) / np.sqrt(ubar / sup_daily["kg"]), 0.0)
+            def _recommend_chart_type(df_daily: pd.DataFrame) -> tuple[str, str]:
+                exposure_ratio = (df_daily["kg"] > 0).mean()
+                has_exposure = exposure_ratio >= 0.6
+                reason_parts = []
+                if has_exposure:
+                    kg_pos = df_daily[df_daily["kg"] > 0]["kg"]
+                    cv_kg = kg_pos.std() / kg_pos.mean() if not kg_pos.empty and kg_pos.mean() > 0 else 0
+                    avg_rate = df_daily["count"].sum() / max(df_daily["kg"].sum(), 1e-9)
+                    if cv_kg > 0.3:
+                        reason_parts.append("일일 노출량 변동이 큰 편")
+                        return "u", " / ".join(reason_parts + ["가변 표본 → u-chart 추천"])
+                    if avg_rate < 0.05:
+                        reason_parts.append("결함률이 낮고 표본이 비교적 일정")
+                        return "p", " / ".join(reason_parts + ["이상비율 관리(p-chart)"])
+                    reason_parts.append("노출량이 존재하며 가변성 낮음")
+                    return "u", " / ".join(reason_parts + ["결점률 관리(u-chart)"])
+                avg_cnt = df_daily["count"].mean()
+                if avg_cnt <= 3:
+                    return "np", "노출량이 없어 건수 자체를 추적(np-chart)"
+                return "c", "노출량이 없어 결점 건수 자체 관리(c-chart)"
 
-            u_line = alt.Chart(sup_daily).mark_line(color="#3949AB").encode(
-                x="dt:T", y=alt.Y("u:Q", title="결점률 u (count/kg)", axis=alt.Axis(format=".4f"))
+            def _build_chart_df(df_daily: pd.DataFrame, chart_type: str) -> pd.DataFrame:
+                work = df_daily.copy()
+                eps = 1e-9
+                if chart_type == "u":
+                    work["metric"] = np.where(work["kg"] > 0, work["count"] / work["kg"], np.nan)
+                    center = work["count"].sum() / max(work["kg"].sum(), eps)
+                    work["sigma"] = np.where(work["kg"] > 0, np.sqrt(np.maximum(center, 0) / work["kg"]), np.nan)
+                    work["cl"] = center
+                    work["ucl"] = center + 3 * work["sigma"]
+                    work["lcl"] = np.maximum(0.0, center - 3 * work["sigma"])
+                    work["chart_label"] = "u-chart (count/kg)"
+                elif chart_type == "p":
+                    work["sample"] = work["kg"].replace(0, np.nan)
+                    center = work["count"].sum() / max(work["sample"].sum(), eps)
+                    work["metric"] = np.where(work["sample"] > 0, work["count"] / work["sample"], np.nan)
+                    work["sigma"] = np.where(
+                        work["sample"] > 0,
+                        np.sqrt(np.maximum(center * (1 - center), 0) / work["sample"]),
+                        np.nan,
+                    )
+                    work["cl"] = center
+                    work["ucl"] = center + 3 * work["sigma"]
+                    work["lcl"] = np.maximum(0.0, center - 3 * work["sigma"])
+                    work["chart_label"] = "p-chart (불량비율)"
+                elif chart_type == "np":
+                    n_est = work["kg"].replace(0, np.nan).mean()
+                    n_est = n_est if pd.notna(n_est) and n_est > 0 else max(work["count"].mean(), 1)
+                    center_rate = work["count"].sum() / (n_est * max(len(work), 1))
+                    work["metric"] = work["count"]
+                    work["sigma"] = np.sqrt(np.maximum(center_rate * (1 - center_rate), 0)) * n_est
+                    work["cl"] = center_rate * n_est
+                    work["ucl"] = work["cl"] + 3 * work["sigma"]
+                    work["lcl"] = np.maximum(0.0, work["cl"] - 3 * work["sigma"])
+                    work["chart_label"] = "np-chart (불량개수)"
+                elif chart_type == "I-MR":
+                    work["metric"] = np.where(work["kg"] > 0, work["count"] / work["kg"], work["count"])
+                    center = work["metric"].mean()
+                    mr = work["metric"].diff().abs()
+                    mr_bar = mr[1:].mean()
+                    d2 = 1.128
+                    sigma = mr_bar / d2 if d2 > 0 else 0
+                    work["sigma"] = sigma
+                    work["cl"] = center
+                    work["ucl"] = center + 3 * sigma
+                    work["lcl"] = center - 3 * sigma
+                    work["chart_label"] = "I-MR (개별값)"
+                else:  # c-chart
+                    work["metric"] = work["count"]
+                    center = work["metric"].mean()
+                    sigma = np.sqrt(np.maximum(center, 0))
+                    work["sigma"] = sigma
+                    work["cl"] = center
+                    work["ucl"] = center + 3 * sigma
+                    work["lcl"] = np.maximum(0.0, center - 3 * sigma)
+                    work["chart_label"] = "c-chart (결점건수)"
+                work["sigma"] = work["sigma"].replace(0, np.nan)
+                work["z"] = (work["metric"] - work["cl"]) / work["sigma"]
+                return work
+
+            def _detect_rules(chart_df: pd.DataFrame, selected_rules: list[str]) -> tuple[pd.DataFrame, list[dict]]:
+                z = chart_df["z"].fillna(0)
+                labels = [[] for _ in range(len(chart_df))]
+                violations = []
+
+                def _mark(idx_list, rule_name, description):
+                    for i in idx_list:
+                        labels[i].append(rule_name)
+                    for i in idx_list:
+                        violations.append({
+                            "dt": chart_df.iloc[i]["dt"],
+                            "rule": rule_name,
+                            "설명": description,
+                            "값": chart_df.iloc[i]["metric"],
+                        })
+
+                if "3시그마" in selected_rules:
+                    breach = chart_df.index[(z > 3) | (z < -3)].tolist()
+                    _mark(breach, "3시그마", "관리한계(UCL/LCL) 초과")
+
+                if "8점 한쪽" in selected_rules:
+                    side = np.sign(z.replace(0, np.nan)).fillna(0)
+                    run = 0
+                    last = 0
+                    run_idx = []
+                    for i, sgn in enumerate(side):
+                        if sgn != 0 and sgn == last:
+                            run += 1
+                        else:
+                            run = 1 if sgn != 0 else 0
+                        last = sgn
+                        run_idx.append(run)
+                    breach = [i for i, r in enumerate(run_idx) if r >= 8]
+                    _mark(breach, "8점 한쪽", "연속 8점이 중앙선 한쪽")
+
+                if "추세 6점" in selected_rules:
+                    inc = dec = 0
+                    trend_idx = []
+                    for i in range(len(chart_df)):
+                        if i == 0:
+                            inc = dec = 1
+                        else:
+                            inc = inc + 1 if chart_df.iloc[i]["metric"] > chart_df.iloc[i-1]["metric"] else 1
+                            dec = dec + 1 if chart_df.iloc[i]["metric"] < chart_df.iloc[i-1]["metric"] else 1
+                        trend_idx.append(max(inc, dec))
+                    breach = [i for i, r in enumerate(trend_idx) if r >= 6]
+                    _mark(breach, "추세 6점", "연속 6점 상승/하락")
+
+                if "2/3점 2시그마 밖" in selected_rules:
+                    sigma2 = (z >= 2) | (z <= -2)
+                    for i in range(len(chart_df) - 2):
+                        window = sigma2.iloc[i:i+3]
+                        if window.sum() >= 2:
+                            _mark(range(i, i+3), "2/3점 2시그마 밖", "최근 3점 중 2점이 ±2σ 밖")
+
+                if "4/5점 1시그마 밖" in selected_rules:
+                    sigma1 = (z >= 1) | (z <= -1)
+                    for i in range(len(chart_df) - 4):
+                        window = sigma1.iloc[i:i+5]
+                        if window.sum() >= 4:
+                            _mark(range(i, i+5), "4/5점 1시그마 밖", "최근 5점 중 4점이 ±1σ 밖")
+
+                label_series = ["; ".join(sorted(set(l))) if l else "정상" for l in labels]
+                chart_df = chart_df.copy()
+                chart_df["violation"] = label_series
+                return chart_df, violations
+
+            rec_chart, rec_reason = _recommend_chart_type(sup_daily)
+            chart_options = ["자동 추천", "u", "c", "p", "np", "I-MR"]
+            chart_labels = {
+                "u": "u-chart", "c": "c-chart", "p": "p-chart", "np": "np-chart", "I-MR": "I-MR"
+            }
+            default_idx = chart_options.index(rec_chart) if rec_chart in chart_options else 0
+            sel_chart = st.radio(
+                "관리도 유형 선택 (자동 추천 포함)",
+                chart_options,
+                index=default_idx,
+                format_func=lambda x: "자동 추천(" + chart_labels.get(rec_chart, "u-chart") + ")" if x == "자동 추천" else chart_labels.get(x, x)
             )
-            cl_rule = alt.Chart(sup_daily).mark_rule(color="#00897B", strokeDash=[6, 4]).encode(
-                x="dt:T", y="mean(u):Q"
-            )
-            ucl_line = alt.Chart(sup_daily).mark_line(color="#E53935", strokeDash=[4, 3]).encode(
-                x="dt:T", y="ucl:Q"
-            )
-            lcl_line = alt.Chart(sup_daily).mark_line(color="#E53935", strokeDash=[4, 3]).encode(
-                x="dt:T", y="lcl:Q"
-            )
-            pts_spc = alt.Chart(sup_daily).mark_circle(size=50).encode(
-                x="dt:T", y="u:Q",
-                color=alt.condition(
-                    "datum.u > datum.ucl || datum.u < datum.lcl",
-                    alt.value("#E53935"),
-                    alt.value("#43A047"),
-                ),
-                tooltip=["dt:T", "count:Q", "kg:Q", "u:Q", "ucl:Q", "lcl:Q", "z:Q"],
+            chosen_chart = rec_chart if sel_chart == "자동 추천" else sel_chart
+            st.caption(f"추천 사유: {rec_reason}")
+
+            rule_choices = ["3시그마", "8점 한쪽", "추세 6점", "2/3점 2시그마 밖", "4/5점 1시그마 밖"]
+            selected_rules = st.multiselect(
+                "Western/Nelson 규칙 적용", rule_choices, default=["3시그마", "8점 한쪽", "2/3점 2시그마 밖"]
             )
 
-            st.altair_chart((ucl_line + lcl_line + cl_rule + u_line + pts_spc).properties(height=300),
-                            use_container_width=True)
-
-            n = len(sup_daily)
-            out_hi = int((sup_daily["u"] > sup_daily["ucl"]).sum())
-            out_lo = int((sup_daily["u"] < sup_daily["lcl"]).sum())
-            out_rate = (out_hi + out_lo) / n
-            z_abs_max = float(np.abs(sup_daily["z"]).max())
-
-            var_obs = float(np.var(sup_daily["count"] - sup_daily["kg"] * ubar, ddof=1))
-            var_exp = float(np.mean(sup_daily["kg"] * ubar))
-            overdisp = var_obs > 1.5 * var_exp
-
-            verdict = []
-            if out_rate >= 0.05 or z_abs_max >= 3.5:
-                verdict.append("**관리불량(경보 수준)**: 관리한계 위반율이 높거나 극단치가 큼.")
-            elif out_rate >= 0.02 or z_abs_max >= 3.0:
-                verdict.append("**주의 필요**: 변동성이 커지고 있음.")
+            chart_df = _build_chart_df(sup_daily, chosen_chart)
+            if chart_df["metric"].isna().all():
+                st.warning("선택한 관리도에 필요한 노출량/표본 정보가 부족합니다.")
             else:
-                verdict.append("**관리양호**: 통계적으로 안정적인 수준.")
-            if overdisp:
-                verdict.append("**과산포 의심**: 단순 포아송 가정보다 산포가 큽니다.")
+                chart_df, violation_rows = _detect_rules(chart_df, selected_rules)
 
-            actions = [
-                "- **자석·체·금속검출기** 점검 주기 단축 및 감도 재검증",
-                "- **LOT별 이물 이력** 사전심사(입고검사 강화), 고위험 LOT 선별 우선",
-                "- **설비 청결/세척 SOP** 강화, 교대/작업자 편차 모니터링",
-                "- **선별량/속도 최적화**로 과부하 구간 제거",
-            ]
-            st.markdown("**통계 평가:** " + " ".join(verdict))
-            st.markdown("**개선 제안:**")
-            st.markdown("\n".join([f"  {a}" for a in actions]))
+                base_line = alt.Chart(chart_df).mark_rule(color="#00897B", strokeDash=[6, 4]).encode(
+                    x="dt:T", y=alt.datum(float(chart_df["cl"].iloc[0]))
+                )
+                limit_band = alt.Chart(chart_df).mark_area(opacity=0.08, color="#FFCDD2").encode(
+                    x="dt:T", y="lcl:Q", y2="ucl:Q"
+                )
+                line = alt.Chart(chart_df).mark_line(color="#3949AB").encode(
+                    x="dt:T", y=alt.Y("metric:Q", title=chart_df["chart_label"].iloc[0], axis=alt.Axis(format=".4f"))
+                )
+                ucl_line = alt.Chart(chart_df).mark_line(color="#E53935", strokeDash=[4, 3]).encode(
+                    x="dt:T", y="ucl:Q"
+                )
+                lcl_line = alt.Chart(chart_df).mark_line(color="#E53935", strokeDash=[4, 3]).encode(
+                    x="dt:T", y="lcl:Q"
+                )
+                pts = alt.Chart(chart_df).mark_circle(size=55).encode(
+                    x="dt:T", y="metric:Q",
+                    color=alt.condition(
+                        alt.datum.violation != "정상",
+                        alt.value("#E53935"),
+                        alt.value("#43A047"),
+                    ),
+                    tooltip=[
+                        "dt:T", "count:Q", "kg:Q", "metric:Q", "ucl:Q", "lcl:Q", "violation:N"
+                    ],
+                )
+
+                st.markdown(
+                    f"**{chart_df['chart_label'].iloc[0]} | 규칙:** {', '.join(selected_rules)}"
+                )
+                st.altair_chart((limit_band + base_line + ucl_line + lcl_line + line + pts).properties(height=320),
+                                use_container_width=True)
+
+                if violation_rows:
+                    viol_df = pd.DataFrame(violation_rows)
+                    st.markdown("**규칙 위반 내역**")
+                    st.dataframe(viol_df, use_container_width=True)
+                else:
+                    st.info("선택한 규칙 위반이 없습니다.")
+
+                n = len(chart_df)
+                out_rate = (chart_df["violation"] != "정상").mean()
+                z_abs_max = float(np.abs(chart_df["z"].fillna(0)).max())
+
+                var_obs = float(np.var(chart_df["count"] - chart_df["kg"] * chart_df["metric"].fillna(0), ddof=1)) if "kg" in chart_df else 0.0
+                var_exp = float(np.mean(chart_df.get("kg", pd.Series([0])) * chart_df["metric"].fillna(0)))
+                overdisp = var_obs > 1.5 * var_exp and var_exp > 0
+
+                verdict = []
+                if out_rate >= 0.05 or z_abs_max >= 3.5:
+                    verdict.append("**관리불량(경보 수준)**: 규칙 위반율이 높거나 극단치가 큽니다.")
+                elif out_rate >= 0.02 or z_abs_max >= 3.0:
+                    verdict.append("**주의 필요**: 변동성이 커지고 있음.")
+                else:
+                    verdict.append("**관리양호**: 통계적으로 안정적인 수준.")
+                if overdisp:
+                    verdict.append("**과산포 의심**: 단순 포아송 가정보다 산포가 큽니다.")
+
+                actions = [
+                    "- **자석·체·금속검출기** 점검 주기 단축 및 감도 재검증",
+                    "- **LOT별 이물 이력** 사전심사(입고검사 강화), 고위험 LOT 선별 우선",
+                    "- **설비 청결/세척 SOP** 강화, 교대/작업자 편차 모니터링",
+                    "- **선별량/속도 최적화**로 과부하 구간 제거",
+                ]
+                st.markdown("**선택 규칙/해석:** " + ", ".join(selected_rules) + " → " + " ".join(verdict))
+                st.markdown("**개선 제안:**")
+                st.markdown("\n".join([f"  {a}" for a in actions]))
 
         st.markdown("#### 🔎 최근 2일 치명적 이물 원료 추적 & 교차공장 사용 이력")
 
