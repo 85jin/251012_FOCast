@@ -1656,7 +1656,11 @@ with tab5:
             st.altair_chart(map_chart, use_container_width=True)
 
             geo_ready = origin_metrics.copy()
-            geo_ready[["lat", "lon"]] = geo_ready["origin"].map(COUNTRY_CENTROIDS).apply(pd.Series)
+            geo_ready[["lat", "lon"]] = geo_ready["origin"].apply(
+                lambda origin: pd.Series(
+                    COUNTRY_CENTROIDS.get(origin, (np.nan, np.nan)), index=["lat", "lon"]
+                )
+            )
             geo_ready = geo_ready.dropna(subset=["lat", "lon"])
             if not geo_ready.empty:
                 geo_ready["rate_scaled"] = geo_ready["rate_per_kg"] * 1e6
