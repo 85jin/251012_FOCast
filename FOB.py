@@ -640,46 +640,74 @@ with tab2:
         mask_recent   = (df["dt"] >= recent_start) & (df["dt"] <= TODAY)
         mask_baseline = (df["dt"] >= baseline_start) & (df["dt"] <= baseline_end)
 
-        # 일일 합산 (동일 7키 + dt 기준으로 분자/분모 합)
+        # 일일 합산 (동일 7키 + dt 기준으로 분자/유일 분모 합)
         grp_cols = KEY7 + ["dt"]
+        key6 = ["plant","line","material_type","material_code","supplier_code"]
 
-        recent_daily = (
-            df.loc[mask_recent, grp_cols + ["count","selection_amount_kg"]]
-              .groupby(grp_cols, as_index=False)[["count","selection_amount_kg"]].sum()
+        den_source_col = (
+            "selection_amount_kg_unique"
+            if "selection_amount_kg_unique" in df.columns
+            else "selection_amount_kg"
         )
-        base_daily = (
-            df.loc[mask_baseline, grp_cols + ["count","selection_amount_kg"]]
-              .groupby(grp_cols, as_index=False)[["count","selection_amount_kg"]].sum()
-        )
+        df["_selection_amount_unique"] = pd.to_numeric(
+            df.get(den_source_col, 0), errors="coerce"
+        ).fillna(0.0)
+
+        def build_daily(mask):
+            counts = (
+                df.loc[mask, grp_cols + ["count"]]
+                  .groupby(grp_cols, as_index=False)["count"].sum()
+            )
+
+            lot_den = (
+                df.loc[mask, key6 + ["lot_no","dt","_selection_amount_unique"]]
+                  .groupby(key6 + ["lot_no","dt"], as_index=False)["_selection_amount_unique"].sum()
+            )
+            day_den = (
+                lot_den.groupby(key6 + ["dt"], as_index=False)["_selection_amount_unique"].sum()
+                       .rename(columns={"_selection_amount_unique": "selection_amount_kg_unique"})
+            )
+
+            return counts.merge(day_den, on=key6 + ["dt"], how="left").fillna({"selection_amount_kg_unique": 0.0})
+
+        recent_daily = build_daily(mask_recent)
+        base_daily = build_daily(mask_baseline)
 
         # 최근/기준 기간 합계 (키=7개)
         key7_only = KEY7.copy()
         recent_sum = (
             recent_daily.groupby(key7_only, as_index=False)
-                        .agg(x_cnt=("count","sum"), x_den=("selection_amount_kg","sum"))
+                        .agg(x_cnt=("count","sum"), x_den_unique=("selection_amount_kg_unique","sum"))
         )
         base_sum = (
             base_daily.groupby(key7_only, as_index=False)
-                      .agg(b_cnt=("count","sum"), b_den=("selection_amount_kg","sum"))
+                      .agg(b_cnt=("count","sum"), b_den_unique=("selection_amount_kg_unique","sum"))
         )
 
         # 결합
         merged = recent_sum.merge(base_sum, on=key7_only, how="outer").fillna(0)
 
-        # rate 계산
-        merged["x_rate"] = np.where(merged["x_den"] > 0, merged["x_cnt"] / merged["x_den"], 0.0)
-        merged["b_rate"] = np.where(merged["b_den"] > 0, merged["b_cnt"] / merged["b_den"], 0.0)
+        # rate 계산 (유일 노출량 기준)
+        merged["x_rate"] = np.where(
+            merged["x_den_unique"] > 0, merged["x_cnt"] / merged["x_den_unique"], 0.0
+        )
+        merged["b_rate"] = np.where(
+            merged["b_den_unique"] > 0, merged["b_cnt"] / merged["b_den_unique"], 0.0
+        )
 
         # 기대값 E = baseline_rate * recent_den
-        merged["x_exp"] = merged["b_rate"] * merged["x_den"]
+        merged["x_exp"] = merged["b_rate"] * merged["x_den_unique"]
 
         # z-score (포아송 근사)
         merged["z"] = np.where(merged["x_exp"] > 0,
                                (merged["x_cnt"] - merged["x_exp"]) / np.sqrt(merged["x_exp"] + EPS),
                                0.0)
 
-        merged["expected_recent_rate"] = np.where(merged["x_den"] > 0,
-                                                  merged["x_exp"] / merged["x_den"], 0.0)
+        merged["expected_recent_rate"] = np.where(
+            merged["x_den_unique"] > 0,
+            merged["x_exp"] / merged["x_den_unique"],
+            0.0,
+        )
 
         merged["flag"] = np.select(
             [merged["z"] >= SURGE_Z, merged["z"] <= -SURGE_Z],
@@ -687,7 +715,11 @@ with tab2:
         )
 
         # 표시 순서/컬럼 정리
-        cols = key7_only + ["x_cnt","x_den","x_rate","b_cnt","b_den","b_rate","expected_recent_rate","z","flag"]
+        cols = key7_only + [
+            "x_cnt","x_den_unique","x_rate",
+            "b_cnt","b_den_unique","b_rate",
+            "expected_recent_rate","z","flag",
+        ]
         return merged[cols].sort_values("z", ascending=False)
 
     with st.expander(f"급증/하락 탐지 (최근 {RECENT_DAYS}일 vs 과거 {BASE_DAYS}일, z≥±{SURGE_Z})", expanded=True):
@@ -696,9 +728,10 @@ with tab2:
         if surge_df is not None and not surge_df.empty:
             st.write(f"분석 대상 조합 수: **{len(surge_df):,}**")
             st.dataframe(
-                surge_df[KEY7 + ["x_cnt","x_den","x_rate","b_cnt","b_den","b_rate","expected_recent_rate","z","flag"]].head(200),
+                surge_df[KEY7 + ["x_cnt","x_den_unique","x_rate","b_cnt","b_den_unique","b_rate","expected_recent_rate","z","flag"]].head(200),
                 use_container_width=True
             )
+            st.caption("노출량(x/b_den_unique)은 LOT·원료 단위로 중복 제거된 selection_amount_kg_unique 합계이며, 기존 selection_amount_kg 기반 집계와 다를 수 있습니다.")
             s1, s2, s3 = st.columns(3)
             with s1: st.metric("상승 경보", int((surge_df["flag"]=="상승").sum()))
             with s2: st.metric("하락 감지", int((surge_df["flag"]=="하락").sum()))
@@ -740,19 +773,32 @@ with tab2:
             (fdf["supplier_code"] == srow["supplier_code"]) &
             (fdf["contam_type"] == srow["contam_type"])
         )
-        ts = fdf.loc[mask, ["dt", "count", "selection_amount_kg"]].copy()
+        ts = fdf.loc[mask, ["dt", "count", "selection_amount_kg", "selection_amount_kg_unique", "lot_no", "plant", "line", "material_type", "material_code", "supplier_code"]].copy()
+
+        ts["_detail_den"] = pd.to_numeric(
+            ts["selection_amount_kg_unique"] if "selection_amount_kg_unique" in ts else ts.get("selection_amount_kg", 0),
+            errors="coerce",
+        ).fillna(0.0)
 
         calendar = pd.DataFrame({"dt": [base_start + timedelta(days=i) for i in range(BASE_DAYS)]})
-        daily = (
-            ts.groupby("dt", as_index=False)[["count", "selection_amount_kg"]].sum()
-              .merge(calendar, on="dt", how="right")
-              .fillna({"count": 0, "selection_amount_kg": 0})
-              .sort_values("dt")
+
+        count_daily = ts.groupby("dt", as_index=False)["count"].sum()
+        den_lot = (
+            ts.groupby(["plant","line","material_type","material_code","supplier_code","lot_no","dt"], as_index=False)["_detail_den"].sum()
         )
-        daily["has_selection"] = daily["selection_amount_kg"] > 0
+        den_daily = den_lot.groupby("dt", as_index=False)["_detail_den"].sum()
+
+        daily = (
+            count_daily.merge(den_daily, on="dt", how="outer")
+                       .merge(calendar, on="dt", how="right")
+                       .fillna({"count": 0, "_detail_den": 0.0})
+                       .sort_values("dt")
+        )
+        daily = daily.rename(columns={"_detail_den": "selection_amount_kg_unique"})
+        daily["has_selection"] = daily["selection_amount_kg_unique"] > 0
         daily["daily_rate"] = np.where(
-            daily["selection_amount_kg"] > 0,
-            daily["count"] / daily["selection_amount_kg"],
+            daily["selection_amount_kg_unique"] > 0,
+            daily["count"] / daily["selection_amount_kg_unique"],
             0.0,
         )
 
@@ -778,7 +824,7 @@ with tab2:
             y=alt.Y("daily_rate:Q", title="일일 이물수준 (count/kg)", axis=alt.Axis(format=".4f")),
             color=alt.value("#1E88E5"),
             shape=alt.value("circle"),
-            tooltip=["dt:T", "count:Q", "selection_amount_kg:Q", "daily_rate:Q"],
+            tooltip=["dt:T", "count:Q", "selection_amount_kg_unique:Q", "daily_rate:Q"],
         )
 
         points_nosel = alt.Chart(daily[~daily["has_selection"]]).mark_square(size=45, opacity=0.45).encode(
@@ -786,7 +832,7 @@ with tab2:
             y=alt.Y("daily_rate:Q"),
             color=alt.value("#9E9E9E"),
             shape=alt.value("square"),
-            tooltip=["dt:T", alt.Tooltip("selection_amount_kg:Q", title="selection_kg")],
+            tooltip=["dt:T", alt.Tooltip("selection_amount_kg_unique:Q", title="selection_kg_unique")],
         )
 
         lines = alt.Chart(lines_df).mark_line(size=2).encode(
