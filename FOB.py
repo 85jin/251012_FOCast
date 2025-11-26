@@ -210,8 +210,8 @@ def normalize_origin_name(origin: str) -> str:
     if not raw:
         return ""
 
-    # 괄호/구분자를 제거하여 ISO 코드, 국호 혼합 입력을 보정
-    cleaned = re.sub(r"[()\[\]]", " ", raw).replace("／", "/")
+    # remove brackets/separators then normalize tokens
+    cleaned = re.sub(r"[()\\[\\]]", " ", raw)
     tokens = [t for t in re.split(r"[/,;]|\s+", cleaned) if t]
     candidate_tokens = [cleaned, raw] + tokens
 
@@ -955,6 +955,136 @@ with tab2:
 
         st.altair_chart((band + points_nosel + points_sel + lines).properties(height=360), use_container_width=True)
         st.caption("• 원형=선별 有, 회색 사각형=선별 無  • 선: b_rate / expected_recent_rate / x_rate (기간 전체 동일 값)")
+        st.markdown("###### 업체 품질 수준 비교 (최대 3개)")
+        key_to_row = view_df.set_index("key")
+
+        def _build_daily_from_row(row):
+            comp_mask = (
+                (fdf["dt"] >= base_start) & (fdf["dt"] <= TODAY) &
+                (fdf["plant"] == row["plant"]) &
+                (fdf["line"] == row["line"]) &
+                (fdf["material_type"] == row["material_type"]) &
+                (fdf["material_code"] == row["material_code"]) &
+                (fdf["supplier_code"] == row["supplier_code"]) &
+                (fdf["contam_type"] == row["contam_type"])
+            )
+            comp_ts = fdf.loc[comp_mask, [
+                "dt",
+                "plant",
+                "line",
+                "material_type",
+                "material_code",
+                "supplier_code",
+                "lot_no",
+                "count",
+                "selection_amount_kg",
+                "selection_amount_kg_unique",
+            ]].copy()
+            comp_ts["_detail_den"] = pd.to_numeric(
+                comp_ts["selection_amount_kg_unique"] if "selection_amount_kg_unique" in comp_ts else comp_ts.get("selection_amount_kg", 0),
+                errors="coerce",
+            ).fillna(0.0)
+
+            calendar_comp = pd.DataFrame({"dt": [base_start + timedelta(days=i) for i in range(BASE_DAYS)]})
+            comp_count_daily = comp_ts.groupby("dt", as_index=False)["count"].sum()
+            comp_den_lot = (
+                comp_ts.groupby(
+                    ["plant","line","material_type","material_code","supplier_code","lot_no","dt"],
+                    as_index=False,
+                )["_detail_den"].sum()
+            )
+            comp_den_daily = comp_den_lot.groupby("dt", as_index=False)["_detail_den"].sum()
+
+            comp_daily = (
+                comp_count_daily.merge(comp_den_daily, on="dt", how="outer")
+                                .merge(calendar_comp, on="dt", how="right")
+                                .fillna({"count": 0, "_detail_den": 0.0})
+                                .sort_values("dt")
+            )
+            comp_daily = comp_daily.rename(columns={"_detail_den": "selection_amount_kg_unique"})
+            comp_daily["has_selection"] = comp_daily["selection_amount_kg_unique"] > 0
+            comp_daily["daily_rate"] = np.where(
+                comp_daily["selection_amount_kg_unique"] > 0,
+                comp_daily["count"] / comp_daily["selection_amount_kg_unique"],
+                0.0,
+            )
+            return comp_daily
+
+        compare_keys = st.multiselect(
+            "업체/원료 조합 선택 (최대 3개, 현재 선택 항목 포함 추천)",
+            options=view_df["key"].tolist(),
+            default=[sel],
+            max_selections=3,
+            help="선택 항목들 중 최대 3개를 골라 평균/산포/관리도 이탈 기반으로 비교합니다.",
+        )
+
+        quality_rows = []
+        for ck in compare_keys:
+            if ck not in key_to_row.index:
+                continue
+            crow = key_to_row.loc[ck]
+            daily_comp = _build_daily_from_row(crow)
+            den_sum = daily_comp["selection_amount_kg_unique"].sum()
+            cnt_sum = daily_comp["count"].sum()
+            has_data = daily_comp[daily_comp["has_selection"]]
+
+            if den_sum <= 0 or has_data.empty:
+                quality_rows.append({
+                    "대상": ck,
+                    "평균 이물률(count/kg)": 0.0,
+                    "산포(표준편차)": 0.0,
+                    "CV(%)": 0.0,
+                    "SPC 이탈(3σ 기준)": 0,
+                    "이물건수": int(cnt_sum),
+                    "선별량(kg)": float(den_sum),
+                    "활성일수": int(has_data["dt"].nunique()),
+                })
+                continue
+
+            center_rate = cnt_sum / max(den_sum, 1e-9)
+            std_rate = float(has_data["daily_rate"].std(ddof=0))
+            cv_pct = float(std_rate / center_rate * 100) if center_rate > 0 else 0.0
+
+            sigma_per_day = np.sqrt(np.maximum(center_rate, 0) / has_data["selection_amount_kg_unique"])
+            ucl = center_rate + 3 * sigma_per_day
+            spc_breach = int((has_data["daily_rate"] > ucl).sum())
+
+            sup_label = f"{crow.get('supplier_name','') or crow.get('supplier_code','')}".strip() or crow.get("supplier_code", "")
+            mat_label = f"{crow.get('material_name','') or crow.get('material_code','')}".strip() or crow.get("material_code", "")
+            contam_label = str(crow.get("contam_type", ""))
+            short_label = f"{sup_label} | {mat_label} | {contam_label}"
+
+            quality_rows.append({
+                "대상": short_label,
+                "평균 이물률(count/kg)": center_rate,
+                "산포(표준편차)": std_rate,
+                "CV(%)": cv_pct,
+                "SPC 이탈(3σ 기준)": spc_breach,
+                "이물건수": int(cnt_sum),
+                "선별량(kg)": float(den_sum),
+                "활성일수": int(has_data["dt"].nunique()),
+            })
+
+        if quality_rows:
+            quality_df = pd.DataFrame(quality_rows)
+            st.dataframe(quality_df, use_container_width=True)
+
+            rate_chart = alt.Chart(quality_df).mark_bar(size=40).encode(
+                x=alt.X("대상:N", title="업체/원료"),
+                y=alt.Y("평균 이물률(count/kg):Q", title="평균 이물률"),
+                color=alt.Color("대상:N", legend=None),
+                tooltip=list(quality_df.columns),
+            )
+            spc_chart = alt.Chart(quality_df).mark_bar(size=40).encode(
+                x=alt.X("대상:N", title="업체/원료"),
+                y=alt.Y("SPC 이탈(3σ 기준):Q", title="관리도 이탈 횟수"),
+                color=alt.Color("대상:N", legend=None),
+                tooltip=list(quality_df.columns),
+            )
+            st.altair_chart(rate_chart.properties(height=260), use_container_width=True)
+            st.altair_chart(spc_chart.properties(height=220), use_container_width=True)
+        else:
+            st.info("비교 대상을 선택하면 평균/산포/관리도 이탈 기반 품질 수준을 보여줍니다.")
 
         st.markdown("###### ▷ 업체 SPC 관리도(u-chart) (선별일수 ≥ 20일일 때 표시)")
 
@@ -1009,7 +1139,6 @@ with tab2:
                     work["sigma"] = np.where(work["kg"] > 0, np.sqrt(np.maximum(center, 0) / work["kg"]), np.nan)
                     work["cl"] = center
                     work["ucl"] = center + 3 * work["sigma"]
-                    work["lcl"] = np.maximum(0.0, center - 3 * work["sigma"])
                     work["chart_label"] = "u-chart (count/kg)"
                 elif chart_type == "p":
                     work["sample"] = work["kg"].replace(0, np.nan)
@@ -1022,7 +1151,6 @@ with tab2:
                     )
                     work["cl"] = center
                     work["ucl"] = center + 3 * work["sigma"]
-                    work["lcl"] = np.maximum(0.0, center - 3 * work["sigma"])
                     work["chart_label"] = "p-chart (불량비율)"
                 elif chart_type == "np":
                     n_est = work["kg"].replace(0, np.nan).mean()
@@ -1032,7 +1160,6 @@ with tab2:
                     work["sigma"] = np.sqrt(np.maximum(center_rate * (1 - center_rate), 0)) * n_est
                     work["cl"] = center_rate * n_est
                     work["ucl"] = work["cl"] + 3 * work["sigma"]
-                    work["lcl"] = np.maximum(0.0, work["cl"] - 3 * work["sigma"])
                     work["chart_label"] = "np-chart (불량개수)"
                 elif chart_type == "I-MR":
                     work["metric"] = np.where(work["kg"] > 0, work["count"] / work["kg"], work["count"])
@@ -1044,7 +1171,6 @@ with tab2:
                     work["sigma"] = sigma
                     work["cl"] = center
                     work["ucl"] = center + 3 * sigma
-                    work["lcl"] = center - 3 * sigma
                     work["chart_label"] = "I-MR (개별값)"
                 else:  # c-chart
                     work["metric"] = work["count"]
@@ -1053,7 +1179,6 @@ with tab2:
                     work["sigma"] = sigma
                     work["cl"] = center
                     work["ucl"] = center + 3 * sigma
-                    work["lcl"] = np.maximum(0.0, center - 3 * sigma)
                     work["chart_label"] = "c-chart (결점건수)"
                 work["sigma"] = work["sigma"].replace(0, np.nan)
                 work["z"] = (work["metric"] - work["cl"]) / work["sigma"]
@@ -1061,6 +1186,7 @@ with tab2:
 
             def _detect_rules(chart_df: pd.DataFrame, selected_rules: list[str]) -> tuple[pd.DataFrame, list[dict]]:
                 z = chart_df["z"].fillna(0)
+                z_pos = z.clip(lower=0)  # 하단 이탈은 무시하고 상단만 관리
                 labels = [[] for _ in range(len(chart_df))]
                 violations = []
 
@@ -1076,11 +1202,11 @@ with tab2:
                         })
 
                 if "3시그마" in selected_rules:
-                    breach = chart_df.index[(z > 3) | (z < -3)].tolist()
-                    _mark(breach, "3시그마", "관리한계(UCL/LCL) 초과")
+                    breach = chart_df.index[(z_pos > 3)].tolist()
+                    _mark(breach, "3시그마", "관리한계 상단(UCL) 초과")
 
                 if "8점 한쪽" in selected_rules:
-                    side = np.sign(z.replace(0, np.nan)).fillna(0)
+                    side = np.sign(z_pos.replace(0, np.nan)).fillna(0)
                     run = 0
                     last = 0
                     run_idx = []
@@ -1092,7 +1218,7 @@ with tab2:
                         last = sgn
                         run_idx.append(run)
                     breach = [i for i, r in enumerate(run_idx) if r >= 8]
-                    _mark(breach, "8점 한쪽", "연속 8점이 중앙선 한쪽")
+                    _mark(breach, "8점 한쪽", "연속 8점이 중심선 위쪽")
 
                 if "추세 6점" in selected_rules:
                     inc = dec = 0
@@ -1104,22 +1230,22 @@ with tab2:
                             inc = inc + 1 if chart_df.iloc[i]["metric"] > chart_df.iloc[i-1]["metric"] else 1
                             dec = dec + 1 if chart_df.iloc[i]["metric"] < chart_df.iloc[i-1]["metric"] else 1
                         trend_idx.append(max(inc, dec))
-                    breach = [i for i, r in enumerate(trend_idx) if r >= 6]
-                    _mark(breach, "추세 6점", "연속 6점 상승/하락")
+                    breach = [i for i, r in enumerate(trend_idx) if r >= 6 and chart_df.iloc[i]["metric"] >= chart_df["cl"].iloc[0]]
+                    _mark(breach, "추세 6점", "연속 6점 상승/하락(상단)")
 
-                if "2/3점 2시그마 밖" in selected_rules:
-                    sigma2 = (z >= 2) | (z <= -2)
+                if "2/3점 2시그마 이상" in selected_rules:
+                    sigma2 = (z_pos >= 2)
                     for i in range(len(chart_df) - 2):
                         window = sigma2.iloc[i:i+3]
                         if window.sum() >= 2:
-                            _mark(range(i, i+3), "2/3점 2시그마 밖", "최근 3점 중 2점이 ±2σ 밖")
+                            _mark(range(i, i+3), "2/3점 2시그마 이상", "최근 3점 중 2점이 +2σ 이상")
 
-                if "4/5점 1시그마 밖" in selected_rules:
-                    sigma1 = (z >= 1) | (z <= -1)
+                if "4/5점 1시그마 이상" in selected_rules:
+                    sigma1 = (z_pos >= 1)
                     for i in range(len(chart_df) - 4):
                         window = sigma1.iloc[i:i+5]
                         if window.sum() >= 4:
-                            _mark(range(i, i+5), "4/5점 1시그마 밖", "최근 5점 중 4점이 ±1σ 밖")
+                            _mark(range(i, i+5), "4/5점 1시그마 이상", "최근 5점 중 4점이 +1σ 이상")
 
                 label_series = ["; ".join(sorted(set(l))) if l else "정상" for l in labels]
                 chart_df = chart_df.copy()
@@ -1139,11 +1265,11 @@ with tab2:
                 format_func=lambda x: "자동 추천(" + chart_labels.get(rec_chart, "u-chart") + ")" if x == "자동 추천" else chart_labels.get(x, x)
             )
             chosen_chart = rec_chart if sel_chart == "자동 추천" else sel_chart
-            st.caption(f"추천 사유: {rec_reason}")
+            st.caption(f"추천 이유: {rec_reason}")
 
-            rule_choices = ["3시그마", "8점 한쪽", "추세 6점", "2/3점 2시그마 밖", "4/5점 1시그마 밖"]
+            rule_choices = ["3시그마", "8점 한쪽", "추세 6점", "2/3점 2시그마 이상", "4/5점 1시그마 이상"]
             selected_rules = st.multiselect(
-                "Western/Nelson 규칙 적용", rule_choices, default=["3시그마", "8점 한쪽", "2/3점 2시그마 밖"]
+                "Western/Nelson 규칙 적용", rule_choices, default=["3시그마", "8점 한쪽", "2/3점 2시그마 이상"]
             )
 
             chart_df = _build_chart_df(sup_daily, chosen_chart)
@@ -1156,16 +1282,13 @@ with tab2:
                     x="dt:T", y=alt.datum(float(chart_df["cl"].iloc[0]))
                 )
                 limit_band = alt.Chart(chart_df).mark_area(opacity=0.08, color="#FFCDD2").encode(
-                    x="dt:T", y="lcl:Q", y2="ucl:Q"
+                    x="dt:T", y="cl:Q", y2="ucl:Q"
                 )
                 line = alt.Chart(chart_df).mark_line(color="#3949AB").encode(
                     x="dt:T", y=alt.Y("metric:Q", title=chart_df["chart_label"].iloc[0], axis=alt.Axis(format=".4f"))
                 )
                 ucl_line = alt.Chart(chart_df).mark_line(color="#E53935", strokeDash=[4, 3]).encode(
                     x="dt:T", y="ucl:Q"
-                )
-                lcl_line = alt.Chart(chart_df).mark_line(color="#E53935", strokeDash=[4, 3]).encode(
-                    x="dt:T", y="lcl:Q"
                 )
                 pts = alt.Chart(chart_df).mark_circle(size=55).encode(
                     x="dt:T", y="metric:Q",
@@ -1175,14 +1298,14 @@ with tab2:
                         alt.value("#43A047"),
                     ),
                     tooltip=[
-                        "dt:T", "count:Q", "kg:Q", "metric:Q", "ucl:Q", "lcl:Q", "violation:N"
+                        "dt:T", "count:Q", "kg:Q", "metric:Q", "ucl:Q", "violation:N"
                     ],
                 )
 
                 st.markdown(
                     f"**{chart_df['chart_label'].iloc[0]} | 규칙:** {', '.join(selected_rules)}"
                 )
-                st.altair_chart((limit_band + base_line + ucl_line + lcl_line + line + pts).properties(height=320),
+                st.altair_chart((limit_band + base_line + ucl_line + line + pts).properties(height=320),
                                 use_container_width=True)
 
                 if violation_rows:
@@ -1744,3 +1867,6 @@ with tab5:
             )
 
 st.caption("※ 고도화: rate 임계치 정책/가중, LOT↔제품 트레이스, 자동 메일/Teams 전송(Graph API) 등 확장 가능.")
+
+
+
